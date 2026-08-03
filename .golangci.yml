@@ -1,0 +1,48 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - unused
+    - errcheck
+    - errorlint
+    - nilerr
+    - forcetypeassert
+    - copyloopvar
+    - durationcheck
+    - gocritic
+    - revive
+    - whitespace
+    - misspell
+    - predeclared
+    - errname
+    - ineffassign
+    - unconvert
+    - gosec
+    - bodyclose
+    - noctx
+    - containedctx
+    - loggercheck
+    - thelper
+    - paralleltest
+    - intrange
+    - usestdlibvars
+  disable:
+    - wrapcheck
+    - err113
+    - funlen
+    - gocyclo
+    - nestif
+    - dupl
+    - goconst
+    - lll
+    - wsl
+    - godot
+    - testifylint
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

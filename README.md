@@ -78,8 +78,14 @@ The server reads configuration from environment variables:
 | `ALLOWED_CLIENTS` | JSON client and scope allowlist. |
 | `ALLOWED_SUBJECTS` | Comma-separated subjects for the local policy adapter. |
 | `HYDRA_ADMIN_TOKEN` | Optional runtime bearer token for Hydra admin requests. |
-| `STATE_STORE` | Currently only `memory`; production mode rejects it. |
+| `STATE_STORE` | Transaction store, `memory` by default or `redis`. Production requires `redis`. |
+| `REDIS_URL` | Redis/Valkey connection URL when `STATE_STORE=redis`. |
+| `REDIS_KEY_PREFIX` | Optional Redis key prefix, default `transaction:`. |
 | `ENVIRONMENT` | Set to `production` to reject the local memory store. |
+
+The application defaults to the in-memory store when `STATE_STORE` is unset. Use
+`.env.example` for a Redis-backed local setup; Redis/Valkey is required for
+replicas and production deployments.
 
 `ALLOWED_CLIENTS` must include exact redirect URI and scope allowlists. Example:
 
@@ -100,11 +106,20 @@ Run the checks directly or through the Makefile targets:
 ```text
 gofmt -w .
 go test ./...
+go test -tags=integration -count=1 ./...
 go test -race ./...
 go vet ./...
 golangci-lint run ./...
 govulncheck ./...
 ```
+
+The integration suite is the provider's end-to-end contract. It drives the
+public HTTP handler and real Hydra, Kratos, policy, and Redis adapters against
+isolated HTTP and Redis fixtures. Run it with `make e2e`; it is also required
+in CI. `make e2e-docker` runs the same contract against a pinned Redis
+container; set `E2E_REDIS_URL` when running the suite against a shared test
+Redis. Live Hydra and Kratos container tests remain deployment-level tests and
+must use pinned service images and runtime configuration.
 
 ## License
 

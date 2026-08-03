@@ -99,12 +99,15 @@ may use a particular OAuth client and scope set.
 
 ## External UI Requirements
 
-- The UI MUST receive only an opaque transaction handle and safe display data.
+- The UI MUST receive only opaque transaction/CSRF handles and safe display
+  data.
 - The UI MUST not receive Hydra admin credentials.
 - The UI MUST not be trusted to provide a subject, role, AAL, or authorization
   result.
 - The callback MUST be verifiable by the service without trusting UI-provided
   claims.
+- Login and consent callbacks MUST include a single-use CSRF proof bound to the
+  server-side transaction.
 - Cross-origin cookies and CORS behavior MUST be explicitly configured and
   covered by integration tests.
 - The UI origin MUST be configured rather than accepted from a request.
@@ -188,6 +191,8 @@ The exact paths remain subject to the Hydra and external UI callback contract.
 - Any state store MUST be behind an interface and support expiry and replay
   protection.
 - Builds MUST be reproducible from a committed Go module lock state.
+- The end-to-end provider contract MUST run in CI with isolated Hydra, Kratos,
+  policy, and transaction-store fixtures.
 
 ## Testing Requirements
 

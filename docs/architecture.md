@@ -83,8 +83,9 @@ the only place that selects concrete implementations.
 
 The service does not use a relational database or gRPC. Its only application
 state is short-lived browser transaction state, which is currently implemented
-in memory for tests and local development. Release deployments use a shared
-Redis/Valkey adapter for transaction state and replica-safe operation.
+in memory for tests and local development. The Redis/Valkey outbound adapter
+stores serialized transactions with expiry and atomically consumes them for
+release deployments and replica-safe operation.
 
 ## Deployment Boundary
 

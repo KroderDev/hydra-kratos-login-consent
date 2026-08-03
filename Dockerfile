@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.26.5-bookworm AS dependencies
+FROM --platform=$BUILDPLATFORM golang:1.26.5-bookworm AS dependencies
 
 WORKDIR /src
 
@@ -14,8 +14,10 @@ ARG RUN_INTEGRATION_TESTS=true
 RUN if [ "$RUN_INTEGRATION_TESTS" = "true" ]; then go test -tags=integration -count=1 ./...; fi
 
 FROM test AS builder
+ARG TARGETOS
+ARG TARGETARCH
 
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
     -trimpath \
     -ldflags='-s -w' \
     -o /out/server \

@@ -25,7 +25,7 @@ handles browser-facing Kratos flows.
 - Provide an authorization policy boundary without hardcoding an authorization
   datastore.
 - Support application-specific token claims.
-- Be suitable for a small stateless Kubernetes workload.
+- Be suitable for a small horizontally scalable deployment.
 - Provide clear security, testing, and operational contracts.
 
 ## Non-Goals
@@ -122,7 +122,9 @@ may use a particular OAuth client and scope set.
 
 ## Security Requirements
 
-- All HTTP traffic MUST use TLS outside local development.
+- All browser-facing and upstream HTTP traffic MUST use TLS outside local
+  development. If TLS terminates before the process, the deployment MUST
+  protect the private hop to the process.
 - Hydra admin and Kratos admin endpoints MUST be private.
 - OAuth client IDs, redirect URIs, and scopes MUST be allowlisted.
 - State, nonce, and transaction values MUST be unpredictable and single-use.
@@ -157,6 +159,12 @@ The initial default policy MAY be a static allowlist for local development. A
 policy implementation MAY later call Keto or another authorization service
 without changing the protocol layer.
 
+For secure environments, the static implementation MUST receive explicit
+subject/client/scope rules through `ALLOWED_SUBJECT_SCOPES`. The HTTP
+implementation MUST receive a complete versioned policy URL and its required
+server-side authentication token instead; it MUST NOT depend on the static
+subject-scope variable.
+
 ## Configuration Requirements
 
 The implementation MUST support configuration for:
@@ -175,6 +183,8 @@ The implementation MUST support configuration for:
 - Policy backend selection.
 - Versioned remote policy URL and authentication when using the HTTP backend.
 - Pending transaction quota.
+- A shared Redis/Valkey transaction store for secure or multi-replica
+  deployments.
 - Environment-specific transport and state-store policy.
 - Policy implementation.
 - Logging level.
@@ -203,16 +213,28 @@ The exact paths remain subject to the Hydra and external UI callback contract.
 
 - The service MUST support graceful shutdown.
 - The service MUST expose liveness and readiness checks.
+- `/healthz` MUST report process liveness without requiring upstream
+  dependencies.
+- `/readyz` MUST check Hydra and Kratos readiness and MUST check Redis/Valkey
+  when the Redis state store is configured. The remote policy endpoint is not a
+  required readiness probe; policy failures MUST fail closed during flows.
 - The service MUST emit structured logs with request IDs.
 - The service SHOULD expose metrics for login, consent, policy, and upstream
   failures.
-- The service SHOULD support horizontal replicas without process-local session
-  state.
+- Secure and release deployments MUST support horizontal replicas without
+  process-local transaction state by using shared Redis/Valkey state.
 - Any state store MUST be behind an interface and support expiry and replay
   protection.
 - Builds MUST be reproducible from a committed Go module lock state.
 - The end-to-end provider contract MUST run in CI with isolated Hydra, Kratos,
   policy, and transaction-store fixtures.
+- Release container images MUST support `linux/amd64` and `linux/arm64`.
+- Release images MUST be scanned for high and critical vulnerabilities before
+  promotion and MUST publish SBOM and provenance attestations for the exact
+  platform image digests and the release index digest.
+- Release images MUST be signed with a documented trusted identity, and
+  deployments MUST verify the signature and attestations before using the
+  digest.
 
 ## Testing Requirements
 
@@ -249,8 +271,8 @@ The first implementation is acceptable when:
 ## Open Decisions
 
 - The in-memory transaction store is reserved for tests and local development.
-  Release deployments use a shared Redis/Valkey adapter before running multiple
-  replicas.
+  Secure and release deployments use a shared Redis/Valkey adapter, including
+  before running multiple replicas.
 - The initial browser handoff returns to the provider with the browser's
   configured Kratos session cookie. An explicit one-time session-token handoff
   remains a future adapter option for deployments where cookie scope cannot be

@@ -95,4 +95,13 @@ HTTP boundary.
 
 The static policy implements the same core port and remains the default for
 development and tests. It returns the locally validated scopes and audiences
-as its effective grants.
+as its effective grants. `ALLOWED_SUBJECTS` and the configured client IDs form
+its subject and client allowlists. In a secure environment, static composition
+also requires non-empty `ALLOWED_SUBJECT_SCOPES`, whose subject/client/scope
+rules restrict the scopes selected for consent.
+
+When `POLICY_BACKEND=http` is selected, `POLICY_URL` must be the complete
+versioned endpoint and `POLICY_AUTH_TOKEN` is required outside development and
+test. The HTTP backend does not read `ALLOWED_SUBJECT_SCOPES`; local client,
+redirect, scope, audience, and claim allowlists still apply before and after the
+remote decision.

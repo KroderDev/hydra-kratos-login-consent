@@ -97,32 +97,27 @@ bounded pending-transaction quota.
 
 ## Deployment Boundary
 
-This service is designed to run as a containerized, stateless Kubernetes
-workload. Kubernetes deployment resources, service configuration, and container
+This service is designed to run as a containerized workload with shared
+transaction state when deployed outside local development. The deployment
+runtime, service discovery, network policy, TLS front door, and container
 packaging belong to the deployment layer and remain separate from the
-application core.
+application core. The contract is platform-neutral; Kubernetes is one example
+of a runtime that can implement it.
 
-Kubernetes deployments should follow these boundaries:
+Every multi-replica or release deployment must use the shared Redis/Valkey
+transaction store. The in-memory store remains suitable only for local
+development and tests. Hydra admin and Kratos administrative endpoints must
+remain private network services, and only explicitly required browser-facing
+provider endpoints may be exposed through an ingress, gateway, or equivalent
+edge.
 
-- Run multiple replicas behind a Kubernetes `Service` with the shared
-  Redis/Valkey transaction store.
-- Provide non-secret settings through environment-backed `ConfigMap` values.
-- Provide Hydra credentials and other secrets through Kubernetes `Secret`
-  values; never expose them to the browser-facing UI.
-- Configure `/healthz` as the liveness probe and `/readyz` as the readiness
-  probe.
-- Route only the documented browser-facing HTTP endpoints through the ingress.
-- Keep Hydra admin and Kratos admin endpoints private and reachable only through
-  cluster network policy.
-- Set a termination grace period that allows the HTTP server's graceful
-  shutdown timeout to complete.
-- Use rolling updates and readiness gating so traffic is not sent to a pod
-  before Hydra and Kratos dependencies are ready.
+Any deployment runtime should provide non-secret settings through its ordinary
+configuration mechanism, inject Hydra, policy, and Redis credentials through
+its secret mechanism, use `/healthz` for liveness and `/readyz` for readiness,
+and allow the HTTP server's graceful shutdown timeout to complete. Readiness
+checks Hydra and Kratos and also checks Redis/Valkey when the Redis state store
+is configured; it does not probe the remote policy endpoint.
 
-The in-memory transaction store remains suitable only for local development and
-tests. It must not be used with multiple Kubernetes replicas or in a release
-deployment.
-
-Hydra admin and Kratos admin endpoints must remain private network services.
-Only the explicitly required browser-facing endpoints may be exposed through an
-ingress or gateway.
+For the complete runtime contract, including HTTPS, browser transactions,
+secret redaction, image verification, and a Kubernetes example, see
+[deployment.md](deployment.md).

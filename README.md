@@ -49,8 +49,12 @@ credentials and is not trusted to make authorization decisions.
 
 ## Documentation
 
-- Read the [full documentation](docs/README.md), including requirements,
-  architecture, trust boundaries, and the HTTP contract.
+- Read the [documentation index](docs/README.md).
+- Use the [configuration reference](docs/configuration.md) for every environment
+  variable and allowlist shape.
+- Use the [deployment contract](docs/deployment.md) for HTTPS, network
+  boundaries, browser transactions, state, probes, secrets, and image
+  verification.
 
 ## Layout
 
@@ -71,6 +75,8 @@ The server reads configuration from environment variables:
 
 | Variable | Purpose |
 |---|---|
+| `LISTEN_ADDR` | Listen address, default `:8080`. |
+| `LOG_LEVEL` | JSON log level, default `info`. |
 | `PUBLIC_URL` | Public provider URL. |
 | `EXTERNAL_UI_URL` | Configured external login/consent UI URL. |
 | `HYDRA_ADMIN_URL` | Private Hydra admin API URL. |
@@ -80,16 +86,16 @@ The server reads configuration from environment variables:
 | `REQUIRED_AAL` | Minimum assurance level, default `aal2`. |
 | `TRANSACTION_TTL` | Browser transaction lifetime, default `5m`, maximum `15m`. |
 | `MAX_PENDING_TRANSACTIONS` | Per-process pending transaction quota, default `10000`. |
-| `ALLOWED_CLIENTS` | JSON client and scope allowlist. |
-| `ALLOWED_SUBJECTS` | Comma-separated subjects for the local policy adapter. |
-| `ALLOWED_SUBJECT_SCOPES` | JSON subject/client/scope policy required outside development and test. |
+| `ALLOWED_CLIENTS` | JSON client, redirect, scope, audience, and claim allowlists. |
+| `ALLOWED_SUBJECTS` | Comma-separated subjects for the static policy adapter. |
+| `ALLOWED_SUBJECT_SCOPES` | JSON subject/client/scope rules for static policy; required in secure environments only when `POLICY_BACKEND=static`. |
 | `POLICY_BACKEND` | Policy backend, `static` by default or `http`. |
 | `POLICY_URL` | Complete versioned HTTP policy endpoint when `POLICY_BACKEND=http`. |
-| `POLICY_AUTH_TOKEN` | Bearer credential for the HTTP policy backend; required outside development and test. |
-| `HYDRA_ADMIN_TOKEN` | Runtime bearer token for Hydra admin requests; required outside development and test. |
-| `STATE_STORE` | Transaction store, `memory` by default or `redis`. Production requires `redis`. |
-| `REDIS_URL` | Redis/Valkey connection URL when `STATE_STORE=redis`; production requires `rediss://`. |
-| `REDIS_KEY_PREFIX` | Redis key prefix; required and environment-specific outside development and test. |
+| `POLICY_AUTH_TOKEN` | Runtime bearer credential for the HTTP policy backend; required in secure HTTP policy deployments. |
+| `HYDRA_ADMIN_TOKEN` | Runtime bearer token for Hydra admin requests; required in secure environments. |
+| `STATE_STORE` | Transaction store, `memory` by default or `redis`; secure environments require `redis`. |
+| `REDIS_URL` | Redis/Valkey connection URL when `STATE_STORE=redis`; secure environments require `rediss://`. |
+| `REDIS_KEY_PREFIX` | Redis key prefix; required and environment-specific for Redis in secure environments. |
 | `ENVIRONMENT` | `development` or `test` permit local transports; other values require secure production settings. |
 
 The application defaults to the in-memory store when `STATE_STORE` is unset. Use
@@ -109,11 +115,13 @@ replicas and production deployments.
 }
 ```
 
-With `POLICY_BACKEND=static`, outside development and test,
-`ALLOWED_SUBJECT_SCOPES` is required and must explicitly authorize each
-subject/client/scope combination. With `POLICY_BACKEND=http`, `POLICY_URL` is
-required and must point to the versioned remote policy contract. Production
-policy URLs must use HTTPS.
+All configured redirect URIs, post-logout redirect URIs, scopes, audiences, and
+claims are exact allowlists; wildcards and inferred clients are not supported.
+With `POLICY_BACKEND=static`, `ALLOWED_SUBJECT_SCOPES` is required outside
+development and test. With `POLICY_BACKEND=http`, `POLICY_URL` and its
+server-side bearer credential are required in secure environments instead;
+`ALLOWED_SUBJECT_SCOPES` is not used. See the [configuration reference](docs/configuration.md)
+for the complete policy and allowlist contract.
 
 See [the remote policy contract](docs/policy-contract.md) for request,
 response, authentication, timeout, and fail-closed behavior.
@@ -152,14 +160,17 @@ docker build --tag hydra-kratos-login-consent:local .
 The image runs as a non-root user and contains only the compiled server and
 runtime certificates. Configuration and secrets must be supplied at runtime;
 they are not copied into the image. For a production deployment, set
-`ENVIRONMENT=production`, `STATE_STORE=redis`, and provide `REDIS_URL` along
-with the required Hydra, Kratos, UI, client, and policy configuration.
+`ENVIRONMENT=production`, use HTTPS URLs, set `STATE_STORE=redis` with a
+`rediss://` `REDIS_URL`, and provide the required Hydra, Kratos, UI, client,
+and policy configuration.
 
 The container listens on port `8080` by default. Its Docker healthcheck calls
-`/healthz`; orchestration readiness probes should call `/readyz` so unavailable
-Hydra, Kratos, or Redis dependencies prevent traffic from being sent to the
-instance.
+`/healthz`; orchestration readiness probes should call `/readyz`. Readiness
+checks Hydra and Kratos and also Redis/Valkey when `STATE_STORE=redis`; it does
+not call the HTTP policy endpoint. See the [deployment image contract](docs/deployment.md#image-supply-chain)
+before using a registry artifact. The local Dockerfile build does not provide
+a registry signature or attestation.
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache License 2.0. See [LICENSE](LICENSE).

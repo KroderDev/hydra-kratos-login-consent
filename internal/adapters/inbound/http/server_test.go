@@ -218,6 +218,191 @@ func TestServer_HealthResponseIncludesSecurityHeaders(t *testing.T) {
 	}
 }
 
+func TestServer_ConsentSubmitForwardsDecisionAndCookie(t *testing.T) {
+	t.Parallel()
+
+	handler, hydra, kratos, policy := newTestHandler(t)
+	hydra.consent = domain.ConsentRequest{
+		Challenge: "consent-challenge", Client: testClient(), Subject: "operator-1",
+		RequestedScopes: []string{"openid", "profile"},
+	}
+	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2"}
+	policy.consentDecision = ports.ConsentDecision{Allowed: true}
+
+	start := httptest.NewRecorder()
+	startRequest := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/consent?consent_challenge=consent-challenge", nil)
+	handler.ServeHTTP(start, startRequest)
+	if start.Code != http.StatusFound {
+		t.Fatalf("start status = %d, want found", start.Code)
+	}
+	location, err := url.Parse(start.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse location: %v", err)
+	}
+	stateCookie := start.Result().Cookies()[0]
+	form := url.Values{
+		"transaction": {location.Query().Get("transaction")}, "csrf": {location.Query().Get("csrf")},
+		"decision": {" ACCEPT "}, "grant_scope": {"openid profile"}, "remember": {"false"},
+	}
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/consent", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Origin", "https://ui.example")
+	request.AddCookie(stateCookie)
+	request.AddCookie(&http.Cookie{Name: "ory_kratos_session", Value: "opaque-session", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusFound || recorder.Header().Get("Location") != hydra.consentRedirect {
+		t.Fatalf("submit status/location = %d/%q", recorder.Code, recorder.Header().Get("Location"))
+	}
+	if kratos.credentials.CookieValue != "opaque-session" {
+		t.Fatalf("Kratos cookie = %q, want opaque-session", kratos.credentials.CookieValue)
+	}
+	if len(hydra.consentAcceptance.GrantScopes) != 2 {
+		t.Fatalf("grant scopes = %#v, want two scopes", hydra.consentAcceptance.GrantScopes)
+	}
+}
+
+func TestServer_LogoutSubmitAndReady(t *testing.T) {
+	t.Parallel()
+
+	handler, hydra, _, _ := newTestHandler(t)
+	hydra.logout = domain.LogoutRequest{Challenge: "logout-challenge", Client: testClient()}
+	start := httptest.NewRecorder()
+	handler.ServeHTTP(start, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/logout?logout_challenge=logout-challenge", nil))
+	if start.Code != http.StatusFound {
+		t.Fatalf("logout start status = %d, want found", start.Code)
+	}
+	location, err := url.Parse(start.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse logout location: %v", err)
+	}
+	form := url.Values{"transaction": {location.Query().Get("transaction")}, "csrf": {location.Query().Get("csrf")}}
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/logout", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Origin", "https://ui.example")
+	request.AddCookie(start.Result().Cookies()[0])
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusFound || recorder.Header().Get("Location") != hydra.logoutRedirect {
+		t.Fatalf("logout submit status/location = %d/%q", recorder.Code, recorder.Header().Get("Location"))
+	}
+	ready := httptest.NewRecorder()
+	handler.ServeHTTP(ready, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/readyz", nil))
+	if ready.Code != http.StatusOK || !strings.Contains(ready.Body.String(), `"status":"ready"`) {
+		t.Fatalf("ready response = %d/%q", ready.Code, ready.Body.String())
+	}
+}
+
+func TestStatusForErrorAndPublicError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		public string
+	}{
+		{name: "bad request", err: domain.ErrInvalidForm, status: http.StatusBadRequest, public: "invalid_request"},
+		{name: "forbidden", err: domain.ErrPolicyDenied, status: http.StatusForbidden, public: "access_denied"},
+		{name: "unauthorized", err: domain.ErrUnauthenticated, status: http.StatusUnauthorized, public: "login_required"},
+		{name: "upstream", err: domain.ErrUpstream, status: http.StatusBadGateway, public: "temporarily_unavailable"},
+		{name: "rate limited", err: domain.ErrRateLimited, status: http.StatusTooManyRequests, public: "rate_limited"},
+		{name: "unknown", err: errors.New("unexpected"), status: http.StatusInternalServerError, public: "server_error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := statusForError(tt.err); got != tt.status {
+				t.Fatalf("statusForError = %d, want %d", got, tt.status)
+			}
+			if got := publicError(tt.status); got != tt.public {
+				t.Fatalf("publicError = %q, want %q", got, tt.public)
+			}
+		})
+	}
+}
+
+func TestValidateRedirectTargetRejectsUnsafeTargets(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		target string
+	}{
+		{name: "relative", target: "/relative"},
+		{name: "non-http scheme", target: "ftp://example.com/path"},
+		{name: "userinfo", target: "https://user@example.com/path"},
+		{name: "fragment", target: "https://example.com/path#fragment"},
+		{name: "header injection", target: "https://example.com/path\r\nX-Test: injected"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if err := validateRedirectTarget(tt.target); !errors.Is(err, domain.ErrInvalidRedirect) {
+				t.Fatalf("validateRedirectTarget(%q) = %v, want invalid redirect", tt.target, err)
+			}
+		})
+	}
+}
+
+func TestRequestIDMiddlewarePreservesValidAndReplacesInvalidIDs(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "valid", input: "request-123", want: "request-123"},
+		{name: "empty", input: "", want: ""},
+		{name: "control character", input: "bad\nvalue", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var contextID string
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				contextID = requestID(r.Context())
+				w.WriteHeader(http.StatusNoContent)
+			})
+			request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+			request.Header.Set("X-Request-ID", tt.input)
+			recorder := httptest.NewRecorder()
+			server.requestID(next).ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, want no content", recorder.Code)
+			}
+			got := recorder.Header().Get("X-Request-ID")
+			if tt.want != "" && got != tt.want {
+				t.Fatalf("response request ID = %q, want %q", got, tt.want)
+			}
+			if tt.want == "" && !validRequestID(got) {
+				t.Fatalf("generated request ID = %q is invalid", got)
+			}
+			if contextID != got {
+				t.Fatalf("context request ID = %q, response = %q", contextID, got)
+			}
+		})
+	}
+}
+
+func TestSetBrowserStateCookieUsesSecureAttributesForHTTPS(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{cfg: testConfig()}
+	recorder := httptest.NewRecorder()
+	server.setBrowserStateCookie(recorder, "state", "opaque-state")
+	cookies := recorder.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cookies = %d, want 1", len(cookies))
+	}
+	cookie := cookies[0]
+	if !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteNoneMode || cookie.Path != "/" {
+		t.Fatalf("cookie attributes = %#v", cookie)
+	}
+}
+
 func newTestHandler(t *testing.T) (http.Handler, *fakeHydra, *fakeKratos, *fakePolicy) {
 	t.Helper()
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
@@ -250,11 +435,14 @@ func newTestHandler(t *testing.T) (http.Handler, *fakeHydra, *fakeKratos, *fakeP
 }
 
 type fakeHydra struct {
-	login           domain.LoginRequest
-	loginAcceptance ports.LoginAcceptance
-	loginRedirect   string
-	consentRedirect string
-	logoutRedirect  string
+	login             domain.LoginRequest
+	consent           domain.ConsentRequest
+	logout            domain.LogoutRequest
+	loginAcceptance   ports.LoginAcceptance
+	consentAcceptance ports.ConsentAcceptance
+	loginRedirect     string
+	consentRedirect   string
+	logoutRedirect    string
 }
 
 func (f *fakeHydra) GetLoginRequest(context.Context, string) (domain.LoginRequest, error) {
@@ -271,10 +459,11 @@ func (f *fakeHydra) RejectLogin(context.Context, string, ports.Rejection) (strin
 }
 
 func (f *fakeHydra) GetConsentRequest(context.Context, string) (domain.ConsentRequest, error) {
-	return domain.ConsentRequest{}, nil
+	return f.consent, nil
 }
 
-func (f *fakeHydra) AcceptConsent(context.Context, string, ports.ConsentAcceptance) (string, error) {
+func (f *fakeHydra) AcceptConsent(_ context.Context, _ string, acceptance ports.ConsentAcceptance) (string, error) {
+	f.consentAcceptance = acceptance
 	return f.consentRedirect, nil
 }
 
@@ -283,7 +472,7 @@ func (f *fakeHydra) RejectConsent(context.Context, string, ports.Rejection) (str
 }
 
 func (f *fakeHydra) GetLogoutRequest(context.Context, string) (domain.LogoutRequest, error) {
-	return domain.LogoutRequest{}, nil
+	return f.logout, nil
 }
 
 func (f *fakeHydra) AcceptLogout(context.Context, string) (string, error) {
@@ -305,7 +494,8 @@ func (f *fakeKratos) ValidateSession(_ context.Context, credentials ports.Sessio
 }
 
 type fakePolicy struct {
-	loginAllowed bool
+	loginAllowed    bool
+	consentDecision ports.ConsentDecision
 }
 
 func (f *fakePolicy) AuthorizeLogin(context.Context, string, string) (bool, error) {
@@ -313,7 +503,7 @@ func (f *fakePolicy) AuthorizeLogin(context.Context, string, string) (bool, erro
 }
 
 func (f *fakePolicy) AuthorizeConsent(context.Context, string, string, []string, []string) (ports.ConsentDecision, error) {
-	return ports.ConsentDecision{}, nil
+	return f.consentDecision, nil
 }
 
 func testConfig() config.Config {

@@ -408,7 +408,7 @@ func formScopes(values []string) []string {
 
 func validateRedirectTarget(target string) error {
 	parsed, err := url.Parse(target)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || strings.ContainsAny(target, "\r\n") {
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || strings.ContainsAny(target, "\r\n") {
 		return domain.ErrInvalidRedirect
 	}
 	return nil

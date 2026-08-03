@@ -45,6 +45,7 @@ func run() error {
 	if secureEnvironment(cfg.Environment) && adminToken == "" {
 		return fmt.Errorf("HYDRA_ADMIN_TOKEN is required outside development and test")
 	}
+	policyToken := strings.TrimSpace(os.Getenv("POLICY_AUTH_TOKEN"))
 
 	httpClient := &http.Client{
 		Timeout: 10 * time.Second,
@@ -83,19 +84,10 @@ func run() error {
 	if checker, ok := transactionStore.(ports.Readiness); ok {
 		readiness = append(readiness, checker)
 	}
-	subjectScopes, err := subjectScopeRules(os.Getenv("ALLOWED_SUBJECT_SCOPES"))
+	providerPolicy, err := newPolicy(cfg, httpClient, policyToken)
 	if err != nil {
 		return err
 	}
-	if secureEnvironment(cfg.Environment) && len(subjectScopes) == 0 {
-		return fmt.Errorf("ALLOWED_SUBJECT_SCOPES is required outside development and test")
-	}
-	providerPolicy := policy.NewStaticWithScopes(
-		csvValues(os.Getenv("ALLOWED_SUBJECTS")),
-		clientIDs(cfg),
-		subjectScopes,
-		secureEnvironment(cfg.Environment),
-	)
 	service, err := application.NewService(cfg, application.Dependencies{
 		Login:     hydraClient,
 		Consent:   hydraClient,
@@ -143,6 +135,40 @@ func run() error {
 			return fmt.Errorf("shutdown http server: %w", err)
 		}
 		return nil
+	}
+}
+
+func newPolicy(cfg config.Config, httpClient *http.Client, token string) (ports.Policy, error) {
+	backend := cfg.PolicyBackend
+	if backend == "" {
+		backend = config.PolicyBackendStatic
+	}
+	switch backend {
+	case config.PolicyBackendStatic:
+		subjectScopes, err := subjectScopeRules(os.Getenv("ALLOWED_SUBJECT_SCOPES"))
+		if err != nil {
+			return nil, err
+		}
+		if secureEnvironment(cfg.Environment) && len(subjectScopes) == 0 {
+			return nil, fmt.Errorf("ALLOWED_SUBJECT_SCOPES is required outside development and test for static policy")
+		}
+		return policy.NewStaticWithScopes(
+			csvValues(os.Getenv("ALLOWED_SUBJECTS")),
+			clientIDs(cfg),
+			subjectScopes,
+			secureEnvironment(cfg.Environment),
+		), nil
+	case config.PolicyBackendHTTP:
+		if secureEnvironment(cfg.Environment) && strings.TrimSpace(token) == "" {
+			return nil, fmt.Errorf("POLICY_AUTH_TOKEN is required outside development and test")
+		}
+		providerPolicy, err := policy.NewHTTP(cfg.PolicyURL, httpClient, token)
+		if err != nil {
+			return nil, fmt.Errorf("create http policy: %w", err)
+		}
+		return providerPolicy, nil
+	default:
+		return nil, fmt.Errorf("unsupported policy backend %q", backend)
 	}
 }
 

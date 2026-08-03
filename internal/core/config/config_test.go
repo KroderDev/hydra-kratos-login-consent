@@ -205,6 +205,70 @@ func TestConfigValidateRejectsInvalidCoreSettings(t *testing.T) {
 	}
 }
 
+func TestConfigValidatePolicyBackend(t *testing.T) {
+	t.Parallel()
+
+	parse := func(raw string) *url.URL {
+		value, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("parse policy URL: %v", err)
+		}
+		return value
+	}
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr bool
+	}{
+		{name: "defaults to static", mutate: func(_ *Config) {}},
+		{name: "rejects unknown backend", mutate: func(cfg *Config) { cfg.PolicyBackend = "database" }, wantErr: true},
+		{name: "requires http URL", mutate: func(cfg *Config) { cfg.PolicyBackend = PolicyBackendHTTP }, wantErr: true},
+		{name: "requires https outside development", mutate: func(cfg *Config) {
+			cfg.Environment = "production"
+			cfg.PolicyBackend = PolicyBackendHTTP
+			cfg.PolicyURL = parse("http://policy.example/v1/authorize")
+		}, wantErr: true},
+		{name: "rejects query", mutate: func(cfg *Config) {
+			cfg.PolicyBackend = PolicyBackendHTTP
+			cfg.PolicyURL = parse("https://policy.example/v1/authorize?tenant=one")
+		}, wantErr: true},
+		{name: "accepts http backend", mutate: func(cfg *Config) {
+			cfg.PolicyBackend = PolicyBackendHTTP
+			cfg.PolicyURL = parse("http://policy.example/v1/authorize")
+		}, wantErr: false},
+		{name: "accepts secure production backend", mutate: func(cfg *Config) {
+			cfg.Environment = "production"
+			cfg.PolicyBackend = PolicyBackendHTTP
+			cfg.PolicyURL = parse("https://policy.example/v1/authorize")
+		}, wantErr: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig(t)
+			tt.mutate(&cfg)
+			if err := cfg.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestConfigValidateRejectsInvalidClaimAllowlist(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t)
+	cfg.Clients["example-client"] = Client{
+		ID:                   "example-client",
+		AllowedRedirectURIs:  []string{"https://client.example/callback"},
+		AllowedScopes:        []string{"openid"},
+		AllowedIDTokenClaims: map[string][]string{"role": {"admin"}},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate accepted a claim requiring an unallowlisted scope")
+	}
+}
+
 func validConfig(t *testing.T) Config {
 	t.Helper()
 	parse := func(raw string) *url.URL {

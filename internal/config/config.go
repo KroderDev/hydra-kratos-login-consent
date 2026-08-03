@@ -19,6 +19,14 @@ type Client = coreconfig.Client
 // Config is an alias for the validated core configuration.
 type Config = coreconfig.Config
 
+// PolicyBackend is an alias for the validated policy backend contract.
+type PolicyBackend = coreconfig.PolicyBackend
+
+const (
+	PolicyBackendStatic = coreconfig.PolicyBackendStatic
+	PolicyBackendHTTP   = coreconfig.PolicyBackendHTTP
+)
+
 // Load reads and validates provider configuration from environment variables.
 func Load() (coreconfig.Config, error) {
 	providerURL, err := requiredURL("PUBLIC_URL")
@@ -60,6 +68,14 @@ func Load() (coreconfig.Config, error) {
 	if environment == "" {
 		environment = "development"
 	}
+	policyBackend := strings.ToLower(strings.TrimSpace(os.Getenv("POLICY_BACKEND")))
+	if policyBackend == "" {
+		policyBackend = string(coreconfig.PolicyBackendStatic)
+	}
+	policyURL, err := optionalURL("POLICY_URL")
+	if err != nil {
+		return coreconfig.Config{}, err
+	}
 
 	clients := map[string]coreconfig.Client{}
 	if raw := strings.TrimSpace(os.Getenv("ALLOWED_CLIENTS")); raw != "" {
@@ -87,6 +103,8 @@ func Load() (coreconfig.Config, error) {
 		TransactionTTL:         ttl,
 		MaxPendingTransactions: maxPendingTransactions,
 		Clients:                clients,
+		PolicyBackend:          coreconfig.PolicyBackend(policyBackend),
+		PolicyURL:              policyURL,
 	}
 	if err := cfg.Validate(); err != nil {
 		return coreconfig.Config{}, err
@@ -108,6 +126,24 @@ func requiredURL(name string) (*url.URL, error) {
 	}
 	if parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return nil, fmt.Errorf("%s must be an origin URL without credentials or fragments", name)
+	}
+	return parsed, nil
+}
+
+func optionalURL(name string) (*url.URL, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", name, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("%s must use http or https", name)
+	}
+	if parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+		return nil, fmt.Errorf("%s must be an absolute URL without credentials or fragments", name)
 	}
 	return parsed, nil
 }

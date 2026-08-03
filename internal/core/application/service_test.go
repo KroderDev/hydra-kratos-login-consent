@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -52,6 +53,9 @@ func TestService_StartLoginAndCompleteLogin(t *testing.T) {
 	}
 	if hydra.loginAcceptance.ACR != "aal2" {
 		t.Fatalf("accepted acr = %q, want aal2", hydra.loginAcceptance.ACR)
+	}
+	if policy.loginInput.AAL != "aal2" || !reflect.DeepEqual(policy.loginInput.AMR, []string{"oidc", "totp"}) {
+		t.Fatalf("login policy input = %#v, want aal2 and oidc/totp", policy.loginInput)
 	}
 }
 
@@ -167,7 +171,7 @@ func TestService_CompleteConsentInvalidCSRFDoesNotConsume(t *testing.T) {
 		RequestedScopes: []string{"openid"},
 	}
 	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2"}
-	policy.consentDecision = ports.ConsentDecision{Allowed: true}
+	policy.consentDecision = ports.ConsentDecision{Allowed: true, GrantedScopes: []string{"openid"}}
 	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
 	if err != nil {
 		t.Fatalf("start consent: %v", err)
@@ -249,18 +253,25 @@ func TestService_ConsentReducesScopesAndFiltersClaims(t *testing.T) {
 
 	service, hydra, kratos, policy, _ := newTestService(t)
 	hydra.consent = domain.ConsentRequest{
-		Challenge:       "consent-challenge",
-		Client:          testClient(),
-		Subject:         "operator-1",
-		RequestedScopes: []string{"openid", "profile"},
+		Challenge:         "consent-challenge",
+		Client:            testClient(),
+		Subject:           "operator-1",
+		RequestedScopes:   []string{"openid", "profile"},
+		RequestedAudience: []string{"api"},
 	}
-	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2"}
+	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2", AMR: []string{"pwd", "totp"}}
 	policy.consentDecision = ports.ConsentDecision{
-		Allowed: true,
+		Allowed:          true,
+		GrantedScopes:    []string{"openid"},
+		GrantedAudiences: []string{"api"},
 		Claims: domain.Claims{
 			IDToken: map[string]any{
 				"email": "operator@example.com",
 				"role":  "operator",
+			},
+			AccessToken: map[string]any{
+				"api_role": "reader",
+				"secret":   "not-allowlisted",
 			},
 		},
 	}
@@ -292,6 +303,18 @@ func TestService_ConsentReducesScopesAndFiltersClaims(t *testing.T) {
 	}
 	if _, exists := hydra.consentAcceptance.Session.IDToken["role"]; exists {
 		t.Fatal("role claim was not filtered by scope policy")
+	}
+	if got := hydra.consentAcceptance.Session.AccessToken["api_role"]; got != "reader" {
+		t.Fatalf("api_role claim = %#v, want reader", got)
+	}
+	if _, exists := hydra.consentAcceptance.Session.AccessToken["secret"]; exists {
+		t.Fatal("unallowlisted access-token claim was not filtered")
+	}
+	if !reflect.DeepEqual(policy.consentInput.RequestedScopes, []string{"openid", "profile"}) ||
+		!reflect.DeepEqual(policy.consentInput.GrantedScopes, []string{"openid"}) ||
+		!reflect.DeepEqual(policy.consentInput.RequestedAudiences, []string{"api"}) ||
+		policy.consentInput.AAL != "aal2" || !reflect.DeepEqual(policy.consentInput.AMR, []string{"pwd", "totp"}) {
+		t.Fatalf("consent policy input = %#v", policy.consentInput)
 	}
 }
 
@@ -353,6 +376,28 @@ func TestService_CompleteConsentRejectsPolicyFailure(t *testing.T) {
 	}
 	if result.URL != "https://hydra.example/oauth2/consent/rejected" || hydra.consentRejection.Error != "temporarily_unavailable" {
 		t.Fatalf("failure result = %#v, rejection = %#v", result, hydra.consentRejection)
+	}
+}
+
+func TestService_StartLoginRejectsPolicyFailureForSkippedLogin(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, _, policy, _ := newTestService(t)
+	service.cfg.RequiredAAL = ""
+	hydra.login = domain.LoginRequest{
+		Challenge: "login-challenge",
+		Client:    testClient(),
+		Skip:      true,
+		Subject:   "operator-1",
+	}
+	policy.loginErr = domain.ErrUpstream
+
+	result, err := service.StartLogin(context.Background(), "login-challenge", ports.LoginStartInput{})
+	if err != nil {
+		t.Fatalf("start login: %v", err)
+	}
+	if result.URL != "https://hydra.example/oauth2/auth/rejected" || hydra.loginRejection.Error != "temporarily_unavailable" {
+		t.Fatalf("result/rejection = %#v/%#v", result, hydra.loginRejection)
 	}
 }
 
@@ -550,6 +595,10 @@ func testConfig() config.Config {
 					"email": nil,
 					"role":  {"profile"},
 				},
+				AllowedAccessTokenClaims: map[string][]string{
+					"api_role": {"openid"},
+				},
+				AllowedAudiences: []string{"api"},
 			},
 		},
 	}
@@ -661,6 +710,8 @@ type fakePolicy struct {
 	consentDecision ports.ConsentDecision
 	loginErr        error
 	consentErr      error
+	loginInput      ports.PolicyInput
+	consentInput    ports.PolicyInput
 }
 
 type fakeReadiness struct {
@@ -673,10 +724,12 @@ func (f *fakeReadiness) Ready(context.Context) error {
 	return f.err
 }
 
-func (f *fakePolicy) AuthorizeLogin(context.Context, string, string) (bool, error) {
+func (f *fakePolicy) AuthorizeLogin(_ context.Context, input ports.PolicyInput) (bool, error) {
+	f.loginInput = input
 	return f.loginAllowed, f.loginErr
 }
 
-func (f *fakePolicy) AuthorizeConsent(context.Context, string, string, []string, []string) (ports.ConsentDecision, error) {
+func (f *fakePolicy) AuthorizeConsent(_ context.Context, input ports.PolicyInput) (ports.ConsentDecision, error) {
+	f.consentInput = input
 	return f.consentDecision, f.consentErr
 }

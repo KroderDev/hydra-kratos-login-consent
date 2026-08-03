@@ -20,6 +20,9 @@ func TestLoadDefaultsAndClientIDs(t *testing.T) {
 	if cfg.RequiredAAL != "aal2" {
 		t.Fatalf("RequiredAAL = %q, want aal2", cfg.RequiredAAL)
 	}
+	if cfg.PolicyBackend != PolicyBackendStatic || cfg.PolicyURL != nil {
+		t.Fatalf("policy config = %#v, want static defaults", cfg)
+	}
 	client, ok := cfg.Clients["example-client"]
 	if !ok || client.ID != "example-client" {
 		t.Fatalf("client = %#v, want client ID populated from map key", client)
@@ -65,6 +68,32 @@ func TestLoadParsesConfiguredValues(t *testing.T) {
 }
 
 //nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestLoadParsesHTTPPolicyConfiguration(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("POLICY_BACKEND", " HTTP ")
+	t.Setenv("POLICY_URL", "http://policy.example/v1/authorize")
+	t.Setenv("POLICY_AUTH_TOKEN", " policy-secret ")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.PolicyBackend != PolicyBackendHTTP || cfg.PolicyURL == nil || cfg.PolicyURL.String() != "http://policy.example/v1/authorize" {
+		t.Fatalf("policy config = %#v", cfg)
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestLoadRequiresHTTPPolicyURL(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("POLICY_BACKEND", "http")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load accepted HTTP policy backend without POLICY_URL")
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
 func TestLoadRejectsMalformedConfiguredValues(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -98,4 +127,8 @@ func setRequiredEnvironment(t *testing.T) {
 	t.Setenv("LISTEN_ADDR", "")
 	t.Setenv("REQUIRED_AAL", "")
 	t.Setenv("KRATOS_SESSION_COOKIE", "")
+	t.Setenv("ENVIRONMENT", "")
+	t.Setenv("POLICY_BACKEND", "")
+	t.Setenv("POLICY_URL", "")
+	t.Setenv("POLICY_AUTH_TOKEN", "")
 }

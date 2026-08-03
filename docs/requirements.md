@@ -148,6 +148,11 @@ able to:
 - Restrict token audiences for that subject, client, and scope set.
 - Return claims appropriate for that client and scope set.
 
+The remote policy contract MUST be versioned and MUST carry subject, client,
+requested and granted scopes, requested audiences, AAL, and AMR context. Its
+response MUST contain an explicit allow or deny decision and effective grants.
+Remote grants MUST only reduce locally validated scopes and audiences.
+
 The initial default policy MAY be a static allowlist for local development. A
 policy implementation MAY later call Keto or another authorization service
 without changing the protocol layer.
@@ -167,6 +172,8 @@ The implementation MUST support configuration for:
 - Allowed scopes.
 - Allowed token audiences.
 - Transaction lifetime.
+- Policy backend selection.
+- Versioned remote policy URL and authentication when using the HTTP backend.
 - Pending transaction quota.
 - Environment-specific transport and state-store policy.
 - Policy implementation.

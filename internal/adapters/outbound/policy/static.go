@@ -37,15 +37,15 @@ func NewStaticWithScopes(subjects, clients []string, scopeRules map[string]map[s
 }
 
 // AuthorizeLogin evaluates the static subject and client allowlists.
-func (p *Static) AuthorizeLogin(_ context.Context, subject, clientID string) (bool, error) {
-	return p.allowed(subject, clientID), nil
+func (p *Static) AuthorizeLogin(_ context.Context, input ports.PolicyInput) (bool, error) {
+	return p.allowed(input.Subject, input.ClientID), nil
 }
 
 // AuthorizeConsent evaluates the same static policy for requested scopes.
-func (p *Static) AuthorizeConsent(_ context.Context, subject, clientID string, scopes, audiences []string) (ports.ConsentDecision, error) {
-	allowed := p.allowed(subject, clientID)
+func (p *Static) AuthorizeConsent(_ context.Context, input ports.PolicyInput) (ports.ConsentDecision, error) {
+	allowed := p.allowed(input.Subject, input.ClientID)
 	if allowed {
-		for _, audience := range audiences {
+		for _, audience := range input.RequestedAudiences {
 			if audience == "" {
 				allowed = false
 				break
@@ -53,18 +53,23 @@ func (p *Static) AuthorizeConsent(_ context.Context, subject, clientID string, s
 		}
 	}
 	if allowed && p.RequireScopes {
-		clientScopes, ok := p.SubjectScopes[subject][clientID]
+		clientScopes, ok := p.SubjectScopes[input.Subject][input.ClientID]
 		if !ok {
 			allowed = false
 		}
-		for _, scope := range scopes {
+		for _, scope := range input.GrantedScopes {
 			if _, ok := clientScopes[scope]; !ok {
 				allowed = false
 				break
 			}
 		}
 	}
-	return ports.ConsentDecision{Allowed: allowed, Claims: cloneClaims(p.Claims)}, nil
+	decision := ports.ConsentDecision{Allowed: allowed, Claims: cloneClaims(p.Claims)}
+	if allowed {
+		decision.GrantedScopes = cloneStrings(input.GrantedScopes)
+		decision.GrantedAudiences = cloneStrings(input.RequestedAudiences)
+	}
+	return decision, nil
 }
 
 func (p *Static) allowed(subject, clientID string) bool {
@@ -115,4 +120,11 @@ func cloneMap(source map[string]any) map[string]any {
 		result[key] = value
 	}
 	return result
+}
+
+func cloneStrings(source []string) []string {
+	if len(source) == 0 {
+		return nil
+	}
+	return append([]string(nil), source...)
 }

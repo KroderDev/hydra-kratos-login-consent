@@ -133,14 +133,28 @@ type TransactionStore interface {
 // Policy evaluates application authorization for scopes and audiences without
 // owning protocol state.
 type Policy interface {
-	AuthorizeLogin(context.Context, string, string) (bool, error)
-	AuthorizeConsent(context.Context, string, string, []string, []string) (ConsentDecision, error)
+	AuthorizeLogin(context.Context, PolicyInput) (bool, error)
+	AuthorizeConsent(context.Context, PolicyInput) (ConsentDecision, error)
 }
 
-// ConsentDecision is the policy result and candidate token claims.
+// PolicyInput contains the server-validated context used by an authorization
+// policy. GrantedScopes are the scopes selected by the user for consent.
+type PolicyInput struct {
+	Subject            string
+	ClientID           string
+	RequestedScopes    []string
+	GrantedScopes      []string
+	RequestedAudiences []string
+	AAL                string
+	AMR                []string
+}
+
+// ConsentDecision is the policy result, effective grants, and candidate token claims.
 type ConsentDecision struct {
-	Allowed bool
-	Claims  domain.Claims
+	Allowed          bool
+	GrantedScopes    []string
+	GrantedAudiences []string
+	Claims           domain.Claims
 }
 
 // Readiness reports whether an external dependency can serve requests.

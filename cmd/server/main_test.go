@@ -2,9 +2,12 @@ package main
 
 import (
 	"log/slog"
+	"net/http"
+	"net/url"
 	"reflect"
 	"testing"
 
+	"github.com/kroderdev/hydra-kratos-login-consent/internal/adapters/outbound/policy"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/config"
 )
 
@@ -156,6 +159,54 @@ func TestClientIDs(t *testing.T) {
 	got := clientIDs(cfg)
 	if len(got) != 2 || !contains(got, "client-a") || !contains(got, "client-b") {
 		t.Fatalf("client IDs = %#v, want both configured IDs", got)
+	}
+}
+
+func TestNewPolicySelectsHTTPBackend(t *testing.T) {
+	t.Parallel()
+
+	policyURL, err := url.Parse("https://policy.example/v1/authorize")
+	if err != nil {
+		t.Fatalf("parse policy URL: %v", err)
+	}
+	provider, err := newPolicy(config.Config{
+		Environment:   "production",
+		PolicyBackend: config.PolicyBackendHTTP,
+		PolicyURL:     policyURL,
+	}, &http.Client{}, "secret")
+	if err != nil {
+		t.Fatalf("newPolicy: %v", err)
+	}
+	if _, ok := provider.(*policy.HTTP); !ok {
+		t.Fatalf("policy type = %T, want HTTP", provider)
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestNewPolicyRequiresStaticRulesOnlyForStaticBackend(t *testing.T) {
+	t.Setenv("ALLOWED_SUBJECTS", "")
+	t.Setenv("ALLOWED_SUBJECT_SCOPES", "")
+	if _, err := newPolicy(config.Config{Environment: "production"}, &http.Client{}, ""); err == nil {
+		t.Fatal("static policy was accepted without production scope rules")
+	}
+
+	policyURL, err := url.Parse("https://policy.example/v1/authorize")
+	if err != nil {
+		t.Fatalf("parse policy URL: %v", err)
+	}
+	if _, err := newPolicy(config.Config{
+		Environment:   "production",
+		PolicyBackend: config.PolicyBackendHTTP,
+		PolicyURL:     policyURL,
+	}, &http.Client{}, ""); err == nil {
+		t.Fatal("HTTP policy was accepted without a production bearer token")
+	}
+	if _, err := newPolicy(config.Config{
+		Environment:   "production",
+		PolicyBackend: config.PolicyBackendHTTP,
+		PolicyURL:     policyURL,
+	}, &http.Client{}, "secret"); err != nil {
+		t.Fatalf("HTTP policy unexpectedly required static scope rules: %v", err)
 	}
 }
 

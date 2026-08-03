@@ -174,6 +174,12 @@
       "sourceType": "github",
       "skillPath": "skills/golang-troubleshooting/SKILL.md",
       "computedHash": "cd547f6013dc017af54d16baf37cca1a0cac3c1db61a728b68828659aae71d55"
+    },
+    "redis-core": {
+      "source": "redis/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/redis-core/SKILL.md",
+      "computedHash": "5b342de2555699d1785335711883711ff6ef7e213a1ea57d6bf693184a5c8683"
     }
   }
 }

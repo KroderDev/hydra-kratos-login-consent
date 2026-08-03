@@ -491,13 +491,15 @@ func (f *hydraFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 type e2ePolicy struct{}
 
-func (e2ePolicy) AuthorizeLogin(context.Context, string, string) (bool, error) {
+func (e2ePolicy) AuthorizeLogin(context.Context, ports.PolicyInput) (bool, error) {
 	return true, nil
 }
 
-func (e2ePolicy) AuthorizeConsent(context.Context, string, string, []string, []string) (ports.ConsentDecision, error) {
+func (e2ePolicy) AuthorizeConsent(_ context.Context, input ports.PolicyInput) (ports.ConsentDecision, error) {
 	return ports.ConsentDecision{
-		Allowed: true,
+		Allowed:          true,
+		GrantedScopes:    append([]string(nil), input.GrantedScopes...),
+		GrantedAudiences: append([]string(nil), input.RequestedAudiences...),
 		Claims: domain.Claims{IDToken: map[string]any{
 			"email": "operator@example.com",
 			"role":  "operator",

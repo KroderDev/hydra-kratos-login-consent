@@ -2,9 +2,11 @@ package policy
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/domain"
+	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/ports"
 )
 
 func TestStaticAuthorization(t *testing.T) {
@@ -24,7 +26,7 @@ func TestStaticAuthorization(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			allowed, err := policy.AuthorizeLogin(context.Background(), tt.subject, tt.clientID)
+			allowed, err := policy.AuthorizeLogin(context.Background(), ports.PolicyInput{Subject: tt.subject, ClientID: tt.clientID})
 			if err != nil {
 				t.Fatalf("AuthorizeLogin: %v", err)
 			}
@@ -39,7 +41,7 @@ func TestStaticEmptyClientAllowlistAllowsAnyClient(t *testing.T) {
 	t.Parallel()
 
 	policy := NewStatic([]string{"operator-1"}, nil)
-	allowed, err := policy.AuthorizeLogin(context.Background(), "operator-1", "any-client")
+	allowed, err := policy.AuthorizeLogin(context.Background(), ports.PolicyInput{Subject: "operator-1", ClientID: "any-client"})
 	if err != nil {
 		t.Fatalf("AuthorizeLogin: %v", err)
 	}
@@ -54,13 +56,33 @@ func TestStaticConsentClonesClaims(t *testing.T) {
 	policy := NewStatic([]string{"operator-1"}, nil)
 	policy.Claims = domain.Claims{IDToken: map[string]any{"email": "operator@example.com"}}
 
-	decision, err := policy.AuthorizeConsent(context.Background(), "operator-1", "client-1", nil, nil)
+	decision, err := policy.AuthorizeConsent(context.Background(), ports.PolicyInput{Subject: "operator-1", ClientID: "client-1"})
 	if err != nil {
 		t.Fatalf("AuthorizeConsent: %v", err)
 	}
 	decision.Claims.IDToken["email"] = "changed"
 	if got := policy.Claims.IDToken["email"]; got != "operator@example.com" {
 		t.Fatalf("policy claim mutated through decision: %v", got)
+	}
+}
+
+func TestStaticDeniedConsentDoesNotReturnClaims(t *testing.T) {
+	t.Parallel()
+
+	policy := NewStatic([]string{"operator-1"}, nil)
+	policy.Claims = domain.Claims{IDToken: map[string]any{"role": "admin"}}
+	decision, err := policy.AuthorizeConsent(context.Background(), ports.PolicyInput{
+		Subject:  "operator-2",
+		ClientID: "client-1",
+	})
+	if err != nil {
+		t.Fatalf("AuthorizeConsent: %v", err)
+	}
+	if decision.Allowed {
+		t.Fatal("consent was allowed for an unknown subject")
+	}
+	if decision.Claims.IDToken != nil || decision.Claims.AccessToken != nil {
+		t.Fatalf("denied decision returned claims: %#v", decision.Claims)
 	}
 }
 
@@ -75,11 +97,33 @@ func TestStaticConsentRequiresConfiguredSubjectScopes(t *testing.T) {
 		},
 		true,
 	)
-	decision, err := policy.AuthorizeConsent(context.Background(), "operator-1", "client-1", []string{"profile"}, nil)
+	decision, err := policy.AuthorizeConsent(context.Background(), ports.PolicyInput{
+		Subject:       "operator-1",
+		ClientID:      "client-1",
+		GrantedScopes: []string{"profile"},
+	})
 	if err != nil {
 		t.Fatalf("AuthorizeConsent: %v", err)
 	}
 	if decision.Allowed {
 		t.Fatal("consent allowed for an unconfigured subject scope")
+	}
+}
+
+func TestStaticConsentReturnsEffectiveGrants(t *testing.T) {
+	t.Parallel()
+
+	policy := NewStatic([]string{"operator-1"}, nil)
+	decision, err := policy.AuthorizeConsent(context.Background(), ports.PolicyInput{
+		Subject:            "operator-1",
+		ClientID:           "client-1",
+		GrantedScopes:      []string{"openid"},
+		RequestedAudiences: []string{"api"},
+	})
+	if err != nil {
+		t.Fatalf("AuthorizeConsent: %v", err)
+	}
+	if !decision.Allowed || !reflect.DeepEqual(decision.GrantedScopes, []string{"openid"}) || !reflect.DeepEqual(decision.GrantedAudiences, []string{"api"}) {
+		t.Fatalf("decision = %#v", decision)
 	}
 }

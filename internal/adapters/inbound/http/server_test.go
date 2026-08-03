@@ -227,7 +227,7 @@ func TestServer_ConsentSubmitForwardsDecisionAndCookie(t *testing.T) {
 		RequestedScopes: []string{"openid", "profile"},
 	}
 	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2"}
-	policy.consentDecision = ports.ConsentDecision{Allowed: true}
+	policy.consentDecision = ports.ConsentDecision{Allowed: true, GrantedScopes: []string{"openid", "profile"}}
 
 	start := httptest.NewRecorder()
 	startRequest := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/consent?consent_challenge=consent-challenge", nil)
@@ -498,11 +498,11 @@ type fakePolicy struct {
 	consentDecision ports.ConsentDecision
 }
 
-func (f *fakePolicy) AuthorizeLogin(context.Context, string, string) (bool, error) {
+func (f *fakePolicy) AuthorizeLogin(context.Context, ports.PolicyInput) (bool, error) {
 	return f.loginAllowed, nil
 }
 
-func (f *fakePolicy) AuthorizeConsent(context.Context, string, string, []string, []string) (ports.ConsentDecision, error) {
+func (f *fakePolicy) AuthorizeConsent(context.Context, ports.PolicyInput) (ports.ConsentDecision, error) {
 	return f.consentDecision, nil
 }
 

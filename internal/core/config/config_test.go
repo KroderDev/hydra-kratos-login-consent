@@ -205,6 +205,83 @@ func TestConfigValidateRejectsInvalidCoreSettings(t *testing.T) {
 	}
 }
 
+func TestConfigValidatePolicyBackend(t *testing.T) {
+	t.Parallel()
+
+	parse := func(raw string) *url.URL {
+		value, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("parse policy URL: %v", err)
+		}
+		return value
+	}
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr bool
+	}{
+		{name: "defaults to static", mutate: func(_ *Config) {}},
+		{name: "rejects unknown backend", mutate: func(cfg *Config) { cfg.PolicyBackend = "database" }, wantErr: true},
+		{name: "requires http URL", mutate: func(cfg *Config) { cfg.PolicyBackend = PolicyBackendHTTP }, wantErr: true},
+		{name: "requires https outside development", mutate: func(cfg *Config) {
+			cfg.Environment = "production"
+			cfg.PolicyBackend = PolicyBackendHTTP
+			cfg.PolicyURL = parse("http://policy.example/v1/authorize")
+		}, wantErr: true},
+		{name: "rejects query", mutate: func(cfg *Config) {
+			cfg.PolicyBackend = PolicyBackendHTTP
+			cfg.PolicyURL = parse("https://policy.example/v1/authorize?tenant=one")
+		}, wantErr: true},
+		{name: "accepts http backend", mutate: func(cfg *Config) {
+			cfg.PolicyBackend = PolicyBackendHTTP
+			cfg.PolicyURL = parse("http://policy.example/v1/authorize")
+		}, wantErr: false},
+		{name: "accepts secure production backend", mutate: func(cfg *Config) {
+			cfg.Environment = "production"
+			cfg.PolicyBackend = PolicyBackendHTTP
+			cfg.PolicyURL = parse("https://policy.example/v1/authorize")
+		}, wantErr: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig(t)
+			tt.mutate(&cfg)
+			if err := cfg.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestConfigValidateClaimAllowlist(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		claims  map[string][]string
+		wantErr bool
+	}{
+		{name: "unallowlisted scope", claims: map[string][]string{"role": {"admin"}}, wantErr: true},
+		{name: "blank claim name", claims: map[string][]string{"": nil}, wantErr: true},
+		{name: "duplicate required scopes", claims: map[string][]string{"role": {"openid", "openid"}}, wantErr: true},
+		{name: "allowed scope", claims: map[string][]string{"role": {"openid"}}, wantErr: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig(t)
+			client := cfg.Clients["example-client"]
+			client.AllowedScopes = []string{"openid"}
+			client.AllowedIDTokenClaims = tt.claims
+			cfg.Clients["example-client"] = client
+			if err := cfg.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func validConfig(t *testing.T) Config {
 	t.Helper()
 	parse := func(raw string) *url.URL {

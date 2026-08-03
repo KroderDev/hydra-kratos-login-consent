@@ -22,6 +22,14 @@ type Client struct {
 	AllowedAccessTokenClaims   map[string][]string `json:"allowed_access_token_claims"`
 }
 
+// PolicyBackend identifies the authorization policy implementation.
+type PolicyBackend string
+
+const (
+	PolicyBackendStatic PolicyBackend = "static"
+	PolicyBackendHTTP   PolicyBackend = "http"
+)
+
 // Config contains validated provider configuration.
 type Config struct {
 	ListenAddress          string
@@ -36,6 +44,8 @@ type Config struct {
 	TransactionTTL         time.Duration
 	MaxPendingTransactions int
 	Clients                map[string]Client
+	PolicyBackend          PolicyBackend
+	PolicyURL              *url.URL
 }
 
 const (
@@ -77,6 +87,21 @@ func (c Config) Validate() error {
 	if c.MaxPendingTransactions < 0 {
 		return fmt.Errorf("max pending transactions cannot be negative")
 	}
+	policyBackend := c.PolicyBackend
+	if policyBackend == "" {
+		policyBackend = PolicyBackendStatic
+	}
+	if policyBackend != PolicyBackendStatic && policyBackend != PolicyBackendHTTP {
+		return fmt.Errorf("unsupported policy backend %q: want static or http", policyBackend)
+	}
+	if policyBackend == PolicyBackendHTTP {
+		if err := validateURL(c.PolicyURL, "policy URL", secureTransport); err != nil {
+			return err
+		}
+		if c.PolicyURL.RawQuery != "" {
+			return fmt.Errorf("policy URL must not contain a query")
+		}
+	}
 	for id, client := range c.Clients {
 		if client.ID != id {
 			return fmt.Errorf("client map key %q does not match client id %q", id, client.ID)
@@ -96,6 +121,12 @@ func (c Config) Validate() error {
 			if strings.TrimSpace(audience) == "" {
 				return fmt.Errorf("client %q has an empty allowed audience", id)
 			}
+		}
+		if err := validateClaimAllowlist(id, client.AllowedIDTokenClaims, client.AllowedScopes); err != nil {
+			return err
+		}
+		if err := validateClaimAllowlist(id, client.AllowedAccessTokenClaims, client.AllowedScopes); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -221,6 +252,32 @@ func hasDuplicates(values []string) bool {
 			return true
 		}
 		seen[value] = struct{}{}
+	}
+	return false
+}
+
+func validateClaimAllowlist(clientID string, claims map[string][]string, allowedScopes []string) error {
+	for name, requiredScopes := range claims {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("client %q has an empty claim name", clientID)
+		}
+		if hasDuplicates(requiredScopes) {
+			return fmt.Errorf("client %q has duplicate required scopes for claim %q", clientID, name)
+		}
+		for _, scope := range requiredScopes {
+			if strings.TrimSpace(scope) == "" || !containsString(allowedScopes, scope) {
+				return fmt.Errorf("client %q claim %q requires an unallowlisted scope %q", clientID, name, scope)
+			}
+		}
+	}
+	return nil
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
 	}
 	return false
 }

@@ -107,9 +107,12 @@ func (s *Service) StartLogin(ctx context.Context, challenge string, input ports.
 	}
 	requiredAAL := domain.HigherAAL(s.cfg.RequiredAAL, request.RequestedAAL)
 	if request.Skip && requiredAAL == "" {
-		allowed, err := s.policy.AuthorizeLogin(ctx, request.Subject, client.ID)
+		allowed, err := s.policy.AuthorizeLogin(ctx, ports.PolicyInput{
+			Subject:  request.Subject,
+			ClientID: client.ID,
+		})
 		if err != nil {
-			return RedirectResult{}, err
+			return s.rejectLoginFailure(ctx, challenge, domain.ErrUpstream, err)
 		}
 		if !allowed {
 			return s.rejectLogin(ctx, challenge, "access_denied", "The login policy denied access.")
@@ -165,7 +168,12 @@ func (s *Service) CompleteLogin(ctx context.Context, handle string, input ports.
 	if !domain.AALAtLeast(session.AAL, domain.HigherAAL(s.cfg.RequiredAAL, transaction.RequestedAAL)) {
 		return s.rejectLoginFailure(ctx, transaction.Challenge, domain.ErrInsufficientAssurance, domain.ErrInsufficientAssurance)
 	}
-	allowed, err := s.policy.AuthorizeLogin(ctx, session.Subject, transaction.ClientID)
+	allowed, err := s.policy.AuthorizeLogin(ctx, ports.PolicyInput{
+		Subject:  session.Subject,
+		ClientID: transaction.ClientID,
+		AAL:      session.AAL,
+		AMR:      append([]string(nil), session.AMR...),
+	})
 	if err != nil {
 		return s.rejectLoginFailure(ctx, transaction.Challenge, domain.ErrUpstream, err)
 	}
@@ -285,7 +293,7 @@ func (s *Service) CompleteConsent(ctx context.Context, input ConsentInput) (Redi
 		Subject:           transaction.Subject,
 		RequestedScopes:   transaction.RequestedScopes,
 		RequestedAudience: transaction.RequestedAudience,
-	}, client, input.GrantScopes, input.Remember, input.RememberFor)
+	}, client, session, input.GrantScopes, input.Remember, input.RememberFor)
 }
 
 // StartLogout validates a Hydra logout challenge and starts a browser-bound
@@ -427,7 +435,7 @@ func (s *Service) validateClient(client domain.Client) (config.Client, error) {
 	return configured, nil
 }
 
-func (s *Service) acceptConsentDecision(ctx context.Context, request domain.ConsentRequest, client config.Client, scopes []string, remember bool, rememberFor int64) (RedirectResult, error) {
+func (s *Service) acceptConsentDecision(ctx context.Context, request domain.ConsentRequest, client config.Client, session domain.Session, scopes []string, remember bool, rememberFor int64) (RedirectResult, error) {
 	if err := validateRemember(remember, rememberFor); err != nil {
 		return RedirectResult{}, err
 	}
@@ -440,17 +448,31 @@ func (s *Service) acceptConsentDecision(ctx context.Context, request domain.Cons
 	if err := validateRequestedSubset(request.RequestedScopes, scopes); err != nil {
 		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrInvalidScope, err)
 	}
-	decision, err := s.policy.AuthorizeConsent(ctx, request.Subject, client.ID, scopes, request.RequestedAudience)
+	decision, err := s.policy.AuthorizeConsent(ctx, ports.PolicyInput{
+		Subject:            request.Subject,
+		ClientID:           client.ID,
+		RequestedScopes:    append([]string(nil), request.RequestedScopes...),
+		GrantedScopes:      append([]string(nil), scopes...),
+		RequestedAudiences: append([]string(nil), request.RequestedAudience...),
+		AAL:                session.AAL,
+		AMR:                append([]string(nil), session.AMR...),
+	})
 	if err != nil {
-		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrPolicyDenied, err)
+		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrUpstream, err)
 	}
 	if !decision.Allowed {
 		return s.rejectConsent(ctx, request.Challenge, "access_denied", "The consent policy denied access.")
 	}
-	claims := s.filterClaims(client, decision.Claims, scopes)
+	if err := validateRequestedSubset(scopes, decision.GrantedScopes); err != nil {
+		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrUpstream, err)
+	}
+	if err := validateAudienceSubset(request.RequestedAudience, decision.GrantedAudiences); err != nil {
+		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrUpstream, err)
+	}
+	claims := s.filterClaims(client, decision.Claims, decision.GrantedScopes)
 	redirect, err := s.consent.AcceptConsent(ctx, request.Challenge, ports.ConsentAcceptance{
-		GrantScopes:   append([]string(nil), scopes...),
-		GrantAudience: append([]string(nil), request.RequestedAudience...),
+		GrantScopes:   append([]string(nil), decision.GrantedScopes...),
+		GrantAudience: append([]string(nil), decision.GrantedAudiences...),
 		Session:       claims,
 		Remember:      remember,
 		RememberFor:   rememberFor,
@@ -566,6 +588,18 @@ func validateRequestedSubset(requested, granted []string) error {
 	for _, scope := range granted {
 		if !contains(requested, scope) {
 			return domain.ErrInvalidScope
+		}
+	}
+	return nil
+}
+
+func validateAudienceSubset(requested, granted []string) error {
+	if hasDuplicates(granted) {
+		return domain.ErrInvalidAudience
+	}
+	for _, audience := range granted {
+		if !contains(requested, audience) {
+			return domain.ErrInvalidAudience
 		}
 	}
 	return nil

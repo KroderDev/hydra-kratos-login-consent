@@ -76,8 +76,13 @@ toward the core:
 - `internal/adapters/inbound/http` maps browser requests to the driving port and
   never calls Ory admin APIs directly.
 - `internal/adapters/outbound` contains Hydra, Kratos, state, and policy
-  implementations of driven ports.
+  implementations of driven ports. Policy has a static adapter for local use
+  and an HTTP adapter for the versioned remote authorization contract.
 - `cmd/server` is the composition root and performs manual constructor wiring.
+
+The composition root selects the policy adapter from `POLICY_BACKEND`. The
+core only receives the abstract policy port; HTTP contract types and bearer
+credentials remain at the outbound adapter boundary.
 
 The core does not import HTTP, Ory clients, environment access, or concrete
 storage. Adapters depend on core ports and domain types; the composition root is

@@ -83,6 +83,9 @@ The server reads configuration from environment variables:
 | `ALLOWED_CLIENTS` | JSON client and scope allowlist. |
 | `ALLOWED_SUBJECTS` | Comma-separated subjects for the local policy adapter. |
 | `ALLOWED_SUBJECT_SCOPES` | JSON subject/client/scope policy required outside development and test. |
+| `POLICY_BACKEND` | Policy backend, `static` by default or `http`. |
+| `POLICY_URL` | Complete versioned HTTP policy endpoint when `POLICY_BACKEND=http`. |
+| `POLICY_AUTH_TOKEN` | Bearer credential for the HTTP policy backend; required outside development and test. |
 | `HYDRA_ADMIN_TOKEN` | Runtime bearer token for Hydra admin requests; required outside development and test. |
 | `STATE_STORE` | Transaction store, `memory` by default or `redis`. Production requires `redis`. |
 | `REDIS_URL` | Redis/Valkey connection URL when `STATE_STORE=redis`; production requires `rediss://`. |
@@ -106,8 +109,14 @@ replicas and production deployments.
 }
 ```
 
-Outside development and test, `ALLOWED_SUBJECT_SCOPES` is required and must
-explicitly authorize each subject/client/scope combination.
+With `POLICY_BACKEND=static`, outside development and test,
+`ALLOWED_SUBJECT_SCOPES` is required and must explicitly authorize each
+subject/client/scope combination. With `POLICY_BACKEND=http`, `POLICY_URL` is
+required and must point to the versioned remote policy contract. Production
+policy URLs must use HTTPS.
+
+See [the remote policy contract](docs/policy-contract.md) for request,
+response, authentication, timeout, and fail-closed behavior.
 
 ## Development
 

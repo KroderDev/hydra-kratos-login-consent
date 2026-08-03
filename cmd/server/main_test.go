@@ -2,9 +2,12 @@ package main
 
 import (
 	"log/slog"
+	"net/http"
+	"net/url"
 	"reflect"
 	"testing"
 
+	"github.com/kroderdev/hydra-kratos-login-consent/internal/adapters/outbound/policy"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/config"
 )
 
@@ -156,6 +159,101 @@ func TestClientIDs(t *testing.T) {
 	got := clientIDs(cfg)
 	if len(got) != 2 || !contains(got, "client-a") || !contains(got, "client-b") {
 		t.Fatalf("client IDs = %#v, want both configured IDs", got)
+	}
+}
+
+//nolint:paralleltest // Runs in the same package as tests that use process-wide t.Setenv.
+func TestNewPolicySelectsHTTPBackend(t *testing.T) {
+	policyURL, err := url.Parse("https://policy.example/v1/authorize")
+	if err != nil {
+		t.Fatalf("parse policy URL: %v", err)
+	}
+	provider, err := newPolicy(config.Config{
+		Environment:   "production",
+		PolicyBackend: config.PolicyBackendHTTP,
+		PolicyURL:     policyURL,
+	}, &http.Client{}, "secret")
+	if err != nil {
+		t.Fatalf("newPolicy: %v", err)
+	}
+	if _, ok := provider.(*policy.HTTP); !ok {
+		t.Fatalf("policy type = %T, want HTTP", provider)
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestNewPolicySelectsStaticBackend(t *testing.T) {
+	t.Setenv("ALLOWED_SUBJECTS", "operator-1")
+	t.Setenv("ALLOWED_SUBJECT_SCOPES", `{"operator-1":{"client-1":["openid"]}}`)
+
+	provider, err := newPolicy(config.Config{
+		Environment:   "production",
+		PolicyBackend: config.PolicyBackendStatic,
+	}, &http.Client{}, "")
+	if err != nil {
+		t.Fatalf("newPolicy: %v", err)
+	}
+	if _, ok := provider.(*policy.Static); !ok {
+		t.Fatalf("policy type = %T, want Static", provider)
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestNewPolicyRejectsMalformedStaticRules(t *testing.T) {
+	t.Setenv("ALLOWED_SUBJECT_SCOPES", "{")
+
+	if _, err := newPolicy(config.Config{Environment: "development"}, &http.Client{}, ""); err == nil {
+		t.Fatal("newPolicy accepted malformed static scope rules")
+	}
+}
+
+//nolint:paralleltest // Runs in the same package as tests that use process-wide t.Setenv.
+func TestNewPolicyRejectsUnsafeHTTPEndpoint(t *testing.T) {
+	policyURL, err := url.Parse("https://user:password@policy.example/v1/authorize")
+	if err != nil {
+		t.Fatalf("parse policy URL: %v", err)
+	}
+	if _, err := newPolicy(config.Config{
+		Environment:   "development",
+		PolicyBackend: config.PolicyBackendHTTP,
+		PolicyURL:     policyURL,
+	}, &http.Client{}, ""); err == nil {
+		t.Fatal("newPolicy accepted an unsafe HTTP policy endpoint")
+	}
+}
+
+//nolint:paralleltest // Runs in the same package as tests that use process-wide t.Setenv.
+func TestNewPolicyRejectsUnknownBackend(t *testing.T) {
+	if _, err := newPolicy(config.Config{PolicyBackend: "database"}, &http.Client{}, ""); err == nil {
+		t.Fatal("newPolicy accepted an unknown policy backend")
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestNewPolicyRequiresStaticRulesOnlyForStaticBackend(t *testing.T) {
+	t.Setenv("ALLOWED_SUBJECTS", "")
+	t.Setenv("ALLOWED_SUBJECT_SCOPES", "")
+	if _, err := newPolicy(config.Config{Environment: "production"}, &http.Client{}, ""); err == nil {
+		t.Fatal("static policy was accepted without production scope rules")
+	}
+
+	policyURL, err := url.Parse("https://policy.example/v1/authorize")
+	if err != nil {
+		t.Fatalf("parse policy URL: %v", err)
+	}
+	if _, err := newPolicy(config.Config{
+		Environment:   "production",
+		PolicyBackend: config.PolicyBackendHTTP,
+		PolicyURL:     policyURL,
+	}, &http.Client{}, ""); err == nil {
+		t.Fatal("HTTP policy was accepted without a production bearer token")
+	}
+	if _, err := newPolicy(config.Config{
+		Environment:   "production",
+		PolicyBackend: config.PolicyBackendHTTP,
+		PolicyURL:     policyURL,
+	}, &http.Client{}, "secret"); err != nil {
+		t.Fatalf("HTTP policy unexpectedly required static scope rules: %v", err)
 	}
 }
 

@@ -23,7 +23,11 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Test
-        run: go test -race -shuffle=on ./...
+        run: go test -race -shuffle=on -coverprofile=coverage.out ./...
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
       - name: Vet
         run: go vet ./...
 

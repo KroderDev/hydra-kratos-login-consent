@@ -1,5 +1,9 @@
 # Hydra Kratos Login Consent
 
+[![CI](https://github.com/KroderDev/hydra-kratos-login-consent/actions/workflows/ci.yml/badge.svg)](https://github.com/KroderDev/hydra-kratos-login-consent/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/KroderDev/hydra-kratos-login-consent)](https://github.com/KroderDev/hydra-kratos-login-consent/blob/main/go.mod)
+[![codecov](https://codecov.io/gh/KroderDev/hydra-kratos-login-consent/graph/badge.svg?token=RP38E7SQVY)](https://codecov.io/gh/KroderDev/hydra-kratos-login-consent)
+
 Generic Go login and consent provider for [Ory Hydra](https://www.ory.sh/hydra/)
 and [Ory Kratos](https://www.ory.sh/kratos/).
 

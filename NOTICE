@@ -1,0 +1,6 @@
+This project is based in part on the Ory Hydra login and consent reference
+implementation:
+
+https://github.com/ory/hydra-login-consent-node
+
+The upstream project is licensed under the Apache License, Version 2.0.

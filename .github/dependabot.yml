@@ -1,0 +1,89 @@
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Santiago
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: deps
+      include: scope
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+    groups:
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      go-non-major:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Santiago
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: deps
+      include: scope
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+    groups:
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      compose-non-major:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Santiago
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: deps
+      include: scope
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+    groups:
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      docker-non-major:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

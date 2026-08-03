@@ -122,6 +122,25 @@ container on localhost through Docker host networking on Linux; set
 and Kratos container tests remain deployment-level tests and must use pinned
 service images and runtime configuration.
 
+## Container Image
+
+Build the production image with:
+
+```sh
+docker build --tag hydra-kratos-login-consent:local .
+```
+
+The image runs as a non-root user and contains only the compiled server and
+runtime certificates. Configuration and secrets must be supplied at runtime;
+they are not copied into the image. For a production deployment, set
+`ENVIRONMENT=production`, `STATE_STORE=redis`, and provide `REDIS_URL` along
+with the required Hydra, Kratos, UI, client, and policy configuration.
+
+The container listens on port `8080` by default. Its Docker healthcheck calls
+`/healthz`; orchestration readiness probes should call `/readyz` so unavailable
+Hydra, Kratos, or Redis dependencies prevent traffic from being sent to the
+instance.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

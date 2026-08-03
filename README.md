@@ -117,9 +117,10 @@ The integration suite is the provider's end-to-end contract. It drives the
 public HTTP handler and real Hydra, Kratos, policy, and Redis adapters against
 isolated HTTP and Redis fixtures. Run it with `make e2e`; it is also required
 in CI. `make e2e-docker` runs the same contract against a pinned Redis
-container; set `E2E_REDIS_URL` when running the suite against a shared test
-Redis. Live Hydra and Kratos container tests remain deployment-level tests and
-must use pinned service images and runtime configuration.
+container on localhost through Docker host networking on Linux; set
+`E2E_REDIS_URL` when running the suite against a shared test Redis. Live Hydra
+and Kratos container tests remain deployment-level tests and must use pinned
+service images and runtime configuration.
 
 ## License
 

@@ -64,10 +64,11 @@ func (p *Static) AuthorizeConsent(_ context.Context, input ports.PolicyInput) (p
 			}
 		}
 	}
-	decision := ports.ConsentDecision{Allowed: allowed, Claims: cloneClaims(p.Claims)}
+	decision := ports.ConsentDecision{Allowed: allowed}
 	if allowed {
 		decision.GrantedScopes = cloneStrings(input.GrantedScopes)
 		decision.GrantedAudiences = cloneStrings(input.RequestedAudiences)
+		decision.Claims = cloneClaims(p.Claims)
 	}
 	return decision, nil
 }

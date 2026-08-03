@@ -458,7 +458,7 @@ func (s *Service) acceptConsentDecision(ctx context.Context, request domain.Cons
 		AMR:                append([]string(nil), session.AMR...),
 	})
 	if err != nil {
-		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrPolicyDenied, err)
+		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrUpstream, err)
 	}
 	if !decision.Allowed {
 		return s.rejectConsent(ctx, request.Challenge, "access_denied", "The consent policy denied access.")

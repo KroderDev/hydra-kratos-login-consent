@@ -94,6 +94,16 @@ func TestLoadRequiresHTTPPolicyURL(t *testing.T) {
 }
 
 //nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestLoadRejectsUnsupportedPolicyBackend(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("POLICY_BACKEND", "database")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load accepted an unsupported policy backend")
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
 func TestLoadRejectsMalformedConfiguredValues(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -103,6 +113,11 @@ func TestLoadRejectsMalformedConfiguredValues(t *testing.T) {
 		{name: "pending transactions", key: "MAX_PENDING_TRANSACTIONS", value: "not-an-int"},
 		{name: "allowed clients", key: "ALLOWED_CLIENTS", value: "{"},
 		{name: "unsupported URL scheme", key: "PUBLIC_URL", value: "ftp://provider.example"},
+		{name: "malformed policy URL", key: "POLICY_URL", value: "%gh"},
+		{name: "unsupported policy URL scheme", key: "POLICY_URL", value: "ftp://policy.example/v1/authorize"},
+		//nolint:gosec // Credential-shaped input is intentional malformed configuration coverage.
+		{name: "policy URL credentials", key: "POLICY_URL", value: "https://user:" + "pw" + "@policy.example/v1/authorize"},
+		{name: "policy URL fragment", key: "POLICY_URL", value: "https://policy.example/v1/authorize#fragment"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

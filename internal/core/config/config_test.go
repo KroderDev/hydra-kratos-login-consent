@@ -254,18 +254,31 @@ func TestConfigValidatePolicyBackend(t *testing.T) {
 	}
 }
 
-func TestConfigValidateRejectsInvalidClaimAllowlist(t *testing.T) {
+func TestConfigValidateClaimAllowlist(t *testing.T) {
 	t.Parallel()
 
-	cfg := validConfig(t)
-	cfg.Clients["example-client"] = Client{
-		ID:                   "example-client",
-		AllowedRedirectURIs:  []string{"https://client.example/callback"},
-		AllowedScopes:        []string{"openid"},
-		AllowedIDTokenClaims: map[string][]string{"role": {"admin"}},
+	tests := []struct {
+		name    string
+		claims  map[string][]string
+		wantErr bool
+	}{
+		{name: "unallowlisted scope", claims: map[string][]string{"role": {"admin"}}, wantErr: true},
+		{name: "blank claim name", claims: map[string][]string{"": nil}, wantErr: true},
+		{name: "duplicate required scopes", claims: map[string][]string{"role": {"openid", "openid"}}, wantErr: true},
+		{name: "allowed scope", claims: map[string][]string{"role": {"openid"}}, wantErr: false},
 	}
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("Validate accepted a claim requiring an unallowlisted scope")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig(t)
+			client := cfg.Clients["example-client"]
+			client.AllowedScopes = []string{"openid"}
+			client.AllowedIDTokenClaims = tt.claims
+			cfg.Clients["example-client"] = client
+			if err := cfg.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
 	}
 }
 

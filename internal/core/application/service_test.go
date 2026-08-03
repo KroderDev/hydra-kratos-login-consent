@@ -360,7 +360,7 @@ func TestService_CompleteConsentRejectsPolicyFailure(t *testing.T) {
 		RequestedScopes: []string{"openid"},
 	}
 	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2"}
-	policy.consentErr = domain.ErrUpstream
+	policy.consentErr = errors.New("policy backend unavailable")
 	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
 	if err != nil {
 		t.Fatalf("start consent: %v", err)
@@ -376,6 +376,76 @@ func TestService_CompleteConsentRejectsPolicyFailure(t *testing.T) {
 	}
 	if result.URL != "https://hydra.example/oauth2/consent/rejected" || hydra.consentRejection.Error != "temporarily_unavailable" {
 		t.Fatalf("failure result = %#v, rejection = %#v", result, hydra.consentRejection)
+	}
+}
+
+func TestService_CompleteConsentRejectsUnsafePolicyGrants(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		decision ports.ConsentDecision
+	}{
+		{
+			name: "expanded scope",
+			decision: ports.ConsentDecision{
+				Allowed:       true,
+				GrantedScopes: []string{"profile"},
+			},
+		},
+		{
+			name: "expanded audience",
+			decision: ports.ConsentDecision{
+				Allowed:          true,
+				GrantedScopes:    []string{"openid"},
+				GrantedAudiences: []string{"other-api"},
+			},
+		},
+		{
+			name: "duplicate audience",
+			decision: ports.ConsentDecision{
+				Allowed:          true,
+				GrantedScopes:    []string{"openid"},
+				GrantedAudiences: []string{"api", "api"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			service, hydra, kratos, policy, _ := newTestService(t)
+			hydra.consent = domain.ConsentRequest{
+				Challenge:         "consent-challenge",
+				Client:            testClient(),
+				Subject:           "operator-1",
+				RequestedScopes:   []string{"openid"},
+				RequestedAudience: []string{"api"},
+			}
+			kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2"}
+			policy.consentDecision = tt.decision
+
+			started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
+			if err != nil {
+				t.Fatalf("start consent: %v", err)
+			}
+			result, err := service.CompleteConsent(context.Background(), ConsentInput{
+				Transaction:  transactionFromRedirect(t, started.URL),
+				CSRFToken:    queryValue(t, started.URL, "csrf"),
+				BrowserState: started.BrowserState,
+				Decision:     "accept",
+				GrantScopes:  []string{"openid"},
+				Credentials:  ports.SessionCredentials{CookieValue: "opaque"},
+			})
+			if err != nil {
+				t.Fatalf("complete consent: %v", err)
+			}
+			if result.URL != "https://hydra.example/oauth2/consent/rejected" || hydra.consentRejection.Error != "temporarily_unavailable" {
+				t.Fatalf("result/rejection = %#v/%#v", result, hydra.consentRejection)
+			}
+			if hydra.consentAcceptance.GrantScopes != nil {
+				t.Fatalf("consent was accepted with unsafe grants: %#v", hydra.consentAcceptance)
+			}
+		})
 	}
 }
 

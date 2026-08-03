@@ -95,9 +95,7 @@ func (c *HTTP) authorize(ctx context.Context, operation string, input ports.Poli
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		if err := drain(response.Body); err != nil {
-			return ports.ConsentDecision{}, err
-		}
+		_ = drain(response.Body)
 		return ports.ConsentDecision{}, fmt.Errorf("%w: policy returned status %d", domain.ErrUpstream, response.StatusCode)
 	}
 

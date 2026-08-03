@@ -66,6 +66,26 @@ func TestStaticConsentClonesClaims(t *testing.T) {
 	}
 }
 
+func TestStaticDeniedConsentDoesNotReturnClaims(t *testing.T) {
+	t.Parallel()
+
+	policy := NewStatic([]string{"operator-1"}, nil)
+	policy.Claims = domain.Claims{IDToken: map[string]any{"role": "admin"}}
+	decision, err := policy.AuthorizeConsent(context.Background(), ports.PolicyInput{
+		Subject:  "operator-2",
+		ClientID: "client-1",
+	})
+	if err != nil {
+		t.Fatalf("AuthorizeConsent: %v", err)
+	}
+	if decision.Allowed {
+		t.Fatal("consent was allowed for an unknown subject")
+	}
+	if decision.Claims.IDToken != nil || decision.Claims.AccessToken != nil {
+		t.Fatalf("denied decision returned claims: %#v", decision.Claims)
+	}
+}
+
 func TestStaticConsentRequiresConfiguredSubjectScopes(t *testing.T) {
 	t.Parallel()
 

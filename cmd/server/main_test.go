@@ -162,9 +162,8 @@ func TestClientIDs(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // Runs in the same package as tests that use process-wide t.Setenv.
 func TestNewPolicySelectsHTTPBackend(t *testing.T) {
-	t.Parallel()
-
 	policyURL, err := url.Parse("https://policy.example/v1/authorize")
 	if err != nil {
 		t.Fatalf("parse policy URL: %v", err)
@@ -179,6 +178,54 @@ func TestNewPolicySelectsHTTPBackend(t *testing.T) {
 	}
 	if _, ok := provider.(*policy.HTTP); !ok {
 		t.Fatalf("policy type = %T, want HTTP", provider)
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestNewPolicySelectsStaticBackend(t *testing.T) {
+	t.Setenv("ALLOWED_SUBJECTS", "operator-1")
+	t.Setenv("ALLOWED_SUBJECT_SCOPES", `{"operator-1":{"client-1":["openid"]}}`)
+
+	provider, err := newPolicy(config.Config{
+		Environment:   "production",
+		PolicyBackend: config.PolicyBackendStatic,
+	}, &http.Client{}, "")
+	if err != nil {
+		t.Fatalf("newPolicy: %v", err)
+	}
+	if _, ok := provider.(*policy.Static); !ok {
+		t.Fatalf("policy type = %T, want Static", provider)
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestNewPolicyRejectsMalformedStaticRules(t *testing.T) {
+	t.Setenv("ALLOWED_SUBJECT_SCOPES", "{")
+
+	if _, err := newPolicy(config.Config{Environment: "development"}, &http.Client{}, ""); err == nil {
+		t.Fatal("newPolicy accepted malformed static scope rules")
+	}
+}
+
+//nolint:paralleltest // Runs in the same package as tests that use process-wide t.Setenv.
+func TestNewPolicyRejectsUnsafeHTTPEndpoint(t *testing.T) {
+	policyURL, err := url.Parse("https://user:password@policy.example/v1/authorize")
+	if err != nil {
+		t.Fatalf("parse policy URL: %v", err)
+	}
+	if _, err := newPolicy(config.Config{
+		Environment:   "development",
+		PolicyBackend: config.PolicyBackendHTTP,
+		PolicyURL:     policyURL,
+	}, &http.Client{}, ""); err == nil {
+		t.Fatal("newPolicy accepted an unsafe HTTP policy endpoint")
+	}
+}
+
+//nolint:paralleltest // Runs in the same package as tests that use process-wide t.Setenv.
+func TestNewPolicyRejectsUnknownBackend(t *testing.T) {
+	if _, err := newPolicy(config.Config{PolicyBackend: "database"}, &http.Client{}, ""); err == nil {
+		t.Fatal("newPolicy accepted an unknown policy backend")
 	}
 }
 

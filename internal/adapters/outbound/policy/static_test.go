@@ -110,6 +110,31 @@ func TestStaticConsentRequiresConfiguredSubjectScopes(t *testing.T) {
 	}
 }
 
+func TestStaticConsentRequireScopesAllowsConfiguredScopes(t *testing.T) {
+	t.Parallel()
+
+	policy := NewStaticWithScopes(
+		[]string{"operator-1"},
+		[]string{"client-1"},
+		map[string]map[string][]string{
+			"operator-1": {"client-1": {"openid", "profile"}},
+		},
+		true,
+	)
+	decision, err := policy.AuthorizeConsent(context.Background(), ports.PolicyInput{
+		Subject:            "operator-1",
+		ClientID:           "client-1",
+		GrantedScopes:      []string{"openid", "profile"},
+		RequestedAudiences: []string{"api"},
+	})
+	if err != nil {
+		t.Fatalf("AuthorizeConsent: %v", err)
+	}
+	if !decision.Allowed || !reflect.DeepEqual(decision.GrantedScopes, []string{"openid", "profile"}) || !reflect.DeepEqual(decision.GrantedAudiences, []string{"api"}) {
+		t.Fatalf("decision = %#v, want configured scopes and audience", decision)
+	}
+}
+
 func TestStaticConsentReturnsEffectiveGrants(t *testing.T) {
 	t.Parallel()
 

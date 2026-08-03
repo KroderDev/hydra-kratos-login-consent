@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 )
 
 //nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
@@ -40,6 +41,48 @@ func TestLoadRequiresURLs(t *testing.T) {
 	t.Setenv("PUBLIC_URL", "")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load returned nil without PUBLIC_URL")
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestLoadParsesConfiguredValues(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("LISTEN_ADDR", "127.0.0.1:9090")
+	t.Setenv("ENVIRONMENT", " TEST ")
+	t.Setenv("TRANSACTION_TTL", "30s")
+	t.Setenv("MAX_PENDING_TRANSACTIONS", "17")
+	t.Setenv("REQUIRED_AAL", "aal1")
+	t.Setenv("KRATOS_SESSION_COOKIE", "custom_session")
+	t.Setenv("ALLOWED_CLIENTS", `{"client":{"allowed_redirect_uris":["https://client.example/callback"]}}`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ListenAddress != "127.0.0.1:9090" || cfg.Environment != "test" || cfg.TransactionTTL != 30*time.Second || cfg.MaxPendingTransactions != 17 || cfg.RequiredAAL != "aal1" || cfg.KratosSessionCookie != "custom_session" {
+		t.Fatalf("parsed config = %#v", cfg)
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestLoadRejectsMalformedConfiguredValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "pending transactions", key: "MAX_PENDING_TRANSACTIONS", value: "not-an-int"},
+		{name: "allowed clients", key: "ALLOWED_CLIENTS", value: "{"},
+		{name: "unsupported URL scheme", key: "PUBLIC_URL", value: "ftp://provider.example"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setRequiredEnvironment(t)
+			t.Setenv(tt.key, tt.value)
+			if _, err := Load(); err == nil {
+				t.Fatal("Load accepted malformed configuration")
+			}
+		})
 	}
 }
 

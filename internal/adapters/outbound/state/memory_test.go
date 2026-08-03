@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -115,5 +116,41 @@ func TestMemoryStore_ConsumeReturnsIndependentSlices(t *testing.T) {
 	}
 	if transaction.RequestedScopes[0] != "openid" || transaction.RequestedAudience[0] != "api" {
 		t.Fatalf("stored slices were aliased: %#v %#v", transaction.RequestedScopes, transaction.RequestedAudience)
+	}
+}
+
+func TestMemoryStore_ConcurrentConsumeHasOneWinner(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	store := NewMemoryStore(func() time.Time { return now })
+	handle, err := store.Create(context.Background(), domain.Transaction{ExpiresAt: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatalf("create transaction: %v", err)
+	}
+	const attempts = 16
+	var group sync.WaitGroup
+	results := make(chan error, attempts)
+	for range attempts {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			_, consumeErr := store.Consume(context.Background(), handle)
+			results <- consumeErr
+		}()
+	}
+	group.Wait()
+	close(results)
+
+	winners := 0
+	for consumeErr := range results {
+		if consumeErr == nil {
+			winners++
+		} else if !errors.Is(consumeErr, domain.ErrReplay) {
+			t.Fatalf("consume error = %v, want replay or success", consumeErr)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("successful consumes = %d, want 1", winners)
 	}
 }

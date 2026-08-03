@@ -73,3 +73,75 @@ func TestClient_ValidateSessionMapsUnauthorized(t *testing.T) {
 		t.Fatalf("error = %v, want unauthenticated", err)
 	}
 }
+
+func TestClient_ValidateSessionRejectsMissingCredentialsWithoutRequest(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	client, err := New(baseURL, server.Client())
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	if _, err := client.ValidateSession(context.Background(), ports.SessionCredentials{}); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("error = %v, want unauthenticated", err)
+	}
+	if calls != 0 {
+		t.Fatalf("request count = %d, want 0", calls)
+	}
+}
+
+func TestClient_ValidateSessionBearerAndInactiveResponses(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer session-token" {
+			t.Errorf("authorization = %q, want bearer token", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"active":false,"identity":{"id":""}}`))
+	}))
+	defer server.Close()
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	client, err := New(baseURL, server.Client())
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	if _, err := client.ValidateSession(context.Background(), ports.SessionCredentials{Token: "session-token"}); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("error = %v, want unauthenticated", err)
+	}
+}
+
+func TestClient_ReadyMapsFailureToUpstream(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if r := w.Header(); r.Get("Content-Type") != "" {
+			t.Errorf("unexpected content type: %q", r.Get("Content-Type"))
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	client, err := New(baseURL, server.Client())
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	if err := client.Ready(context.Background()); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("error = %v, want upstream", err)
+	}
+}

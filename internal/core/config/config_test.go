@@ -133,6 +133,78 @@ func TestConfigValidateRejectsLongTransactionTTL(t *testing.T) {
 	}
 }
 
+func TestConfigEffectiveMaxPendingTransactionsUsesBoundedDefault(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t)
+	if got := cfg.EffectiveMaxPendingTransactions(); got != DefaultMaxPendingTransactions {
+		t.Fatalf("default max pending = %d, want %d", got, DefaultMaxPendingTransactions)
+	}
+	cfg.MaxPendingTransactions = 42
+	if got := cfg.EffectiveMaxPendingTransactions(); got != 42 {
+		t.Fatalf("configured max pending = %d, want 42", got)
+	}
+}
+
+func TestConfigExternalUIOriginAndRedirectValidation(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t)
+	if got := cfg.ExternalUIOrigin(); got != "https://ui.example" {
+		t.Fatalf("external UI origin = %q, want https://ui.example", got)
+	}
+	for _, flow := range []domain.Flow{domain.FlowLogin, domain.FlowConsent, domain.FlowLogout, domain.Flow("unknown")} {
+		if got := cfg.CallbackURL(flow); got == "" {
+			t.Fatalf("callback URL for %q is empty", flow)
+		}
+	}
+	for name, args := range map[string][2]string{
+		"empty csrf":        {"opaque", ""},
+		"empty transaction": {"", "csrf"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := cfg.ExternalRedirect(domain.FlowLogin, args[0], args[1]); !errors.Is(err, domain.ErrInvalidTransaction) {
+				t.Fatalf("error = %v, want invalid transaction", err)
+			}
+		})
+	}
+}
+
+func TestConfigValidateRejectsInvalidCoreSettings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{name: "missing listen address", mutate: func(cfg *Config) { cfg.ListenAddress = "" }},
+		{name: "missing session cookie", mutate: func(cfg *Config) { cfg.KratosSessionCookie = "" }},
+		{name: "unsupported assurance", mutate: func(cfg *Config) { cfg.RequiredAAL = "aal0" }},
+		{name: "zero transaction ttl", mutate: func(cfg *Config) { cfg.TransactionTTL = 0 }},
+		{name: "negative pending limit", mutate: func(cfg *Config) { cfg.MaxPendingTransactions = -1 }},
+		{name: "client key mismatch", mutate: func(cfg *Config) {
+			cfg.Clients["wrong-key"] = cfg.Clients["example-client"]
+			delete(cfg.Clients, "example-client")
+		}},
+		{name: "duplicate audiences", mutate: func(cfg *Config) {
+			client := cfg.Clients["example-client"]
+			client.AllowedAudiences = []string{"api", "api"}
+			cfg.Clients["example-client"] = client
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig(t)
+			tt.mutate(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("Validate returned nil for invalid configuration")
+			}
+		})
+	}
+}
+
 func validConfig(t *testing.T) Config {
 	t.Helper()
 	parse := func(raw string) *url.URL {

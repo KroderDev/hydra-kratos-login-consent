@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -79,6 +80,68 @@ func TestNewRedisStoreRedactsMalformedURLCredentials(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "super-secret") {
 		t.Fatalf("Redis credential leaked in error: %v", err)
+	}
+}
+
+func TestRedisStore_ConcurrentConsumeHasOneWinner(t *testing.T) {
+	t.Parallel()
+
+	store, cleanup := newRedisStore(t)
+	defer cleanup()
+	handle, err := store.Create(context.Background(), domain.Transaction{ExpiresAt: time.Now().Add(time.Minute)})
+	if err != nil {
+		t.Fatalf("create transaction: %v", err)
+	}
+	const attempts = 16
+	var group sync.WaitGroup
+	results := make(chan error, attempts)
+	for range attempts {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			_, consumeErr := store.Consume(context.Background(), handle)
+			results <- consumeErr
+		}()
+	}
+	group.Wait()
+	close(results)
+
+	winners := 0
+	for consumeErr := range results {
+		if consumeErr == nil {
+			winners++
+		} else if !errors.Is(consumeErr, domain.ErrReplay) {
+			t.Fatalf("consume error = %v, want replay or success", consumeErr)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("successful consumes = %d, want 1", winners)
+	}
+}
+
+func TestRedisStore_GetReturnsStoredTransactionAndRejectsMalformedPayload(t *testing.T) {
+	t.Parallel()
+
+	store, cleanup := newRedisStore(t)
+	defer cleanup()
+	handle, err := store.Create(context.Background(), domain.Transaction{
+		Flow: domain.FlowLogin, Challenge: "challenge", ClientID: "client", ExpiresAt: time.Now().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("create transaction: %v", err)
+	}
+	transaction, err := store.Get(context.Background(), handle)
+	if err != nil || transaction.Challenge != "challenge" {
+		t.Fatalf("get transaction = %#v, error = %v", transaction, err)
+	}
+	if _, err := store.Get(context.Background(), "missing"); !errors.Is(err, domain.ErrReplay) {
+		t.Fatalf("missing transaction error = %v, want replay", err)
+	}
+	if err := store.client.Set(context.Background(), store.key("malformed"), "not-json", time.Minute).Err(); err != nil {
+		t.Fatalf("set malformed transaction: %v", err)
+	}
+	if _, err := store.Get(context.Background(), "malformed"); err == nil {
+		t.Fatal("malformed transaction was accepted")
 	}
 }
 

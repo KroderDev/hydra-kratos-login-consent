@@ -3,11 +3,13 @@ package hydra
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 
+	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/domain"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/ports"
 )
 
@@ -100,6 +102,107 @@ func TestClient_LogoutRequestParsesReturnURL(t *testing.T) {
 	}
 	if request.PostLogoutRedirectURI != "https://client.example/logout" {
 		t.Fatalf("post logout redirect = %q, want client logout URL", request.PostLogoutRedirectURI)
+	}
+}
+
+func TestClient_ConsentAndLogoutRequests(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer admin-token" {
+			t.Errorf("authorization = %q, want bearer token", r.Header.Get("Authorization"))
+		}
+		switch r.URL.Path {
+		case "/admin/oauth2/auth/requests/consent":
+			writeJSON(t, w, map[string]any{
+				"challenge": "consent-challenge",
+				"client":    map[string]any{"client_id": "example-client", "client_name": "Example"},
+				"subject":   "operator-1", "requested_scope": []string{"openid", "profile"},
+				"requested_access_token_audience": []string{"api"}, "skip": true,
+			})
+		case "/admin/oauth2/auth/requests/consent/accept":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode consent body: %v", err)
+			}
+			got, ok := body["grant_scope"].([]any)
+			if !ok || len(got) != 1 || got[0] != "openid" {
+				t.Fatalf("grant_scope = %#v, want [openid]", got)
+			}
+			writeJSON(t, w, map[string]string{"redirect_to": "https://hydra.example/consent"})
+		case "/admin/oauth2/auth/requests/consent/reject":
+			writeJSON(t, w, map[string]string{"redirect_to": "https://hydra.example/rejected"})
+		case "/admin/oauth2/auth/requests/logout/accept":
+			writeJSON(t, w, map[string]string{"redirect_to": "https://hydra.example/logout"})
+		case "/admin/oauth2/auth/requests/logout/reject", "/health/ready":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	client, err := New(baseURL, server.Client(), "admin-token")
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+
+	consent, err := client.GetConsentRequest(context.Background(), "consent-challenge")
+	if err != nil || consent.Subject != "operator-1" || !consent.Skip || len(consent.RequestedAudience) != 1 {
+		t.Fatalf("consent = %#v, error = %v", consent, err)
+	}
+	redirect, err := client.AcceptConsent(context.Background(), "consent-challenge", ports.ConsentAcceptance{
+		GrantScopes: []string{"openid"}, GrantAudience: []string{"api"},
+		Session: domain.Claims{IDToken: map[string]any{"email": "operator@example.com"}},
+	})
+	if err != nil || redirect != "https://hydra.example/consent" {
+		t.Fatalf("accept consent = %q, error = %v", redirect, err)
+	}
+	redirect, err = client.RejectConsent(context.Background(), "consent-challenge", ports.Rejection{Error: "access_denied"})
+	if err != nil || redirect != "https://hydra.example/rejected" {
+		t.Fatalf("reject consent = %q, error = %v", redirect, err)
+	}
+	redirect, err = client.AcceptLogout(context.Background(), "logout-challenge")
+	if err != nil || redirect != "https://hydra.example/logout" {
+		t.Fatalf("accept logout = %q, error = %v", redirect, err)
+	}
+	if _, err := client.RejectLogout(context.Background(), "logout-challenge", ports.Rejection{}); err != nil {
+		t.Fatalf("reject logout: %v", err)
+	}
+	if err := client.Ready(context.Background()); err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+}
+
+func TestClient_UpstreamFailuresMapToErrUpstream(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("upstream failure"))
+	}))
+	defer server.Close()
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	client, err := New(baseURL, server.Client(), "")
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	if _, err := client.GetConsentRequest(context.Background(), "challenge"); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("error = %v, want upstream error", err)
+	}
+}
+
+func TestPostLogoutRedirectRejectsDuplicateValues(t *testing.T) {
+	t.Parallel()
+
+	if _, err := postLogoutRedirect("https://hydra.example/logout?post_logout_redirect_uri=a&post_logout_redirect_uri=b"); !errors.Is(err, domain.ErrInvalidRedirect) {
+		t.Fatalf("error = %v, want invalid redirect", err)
 	}
 }
 

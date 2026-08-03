@@ -86,6 +86,35 @@ func TestService_CompleteLoginRejectsInvalidAssurance(t *testing.T) {
 	}
 }
 
+func TestService_CompleteLoginRejectsKratosFailure(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, kratos, _, _ := newTestService(t)
+	hydra.login = domain.LoginRequest{Challenge: "login-challenge", Client: testClient()}
+	kratos.err = errors.New("kratos unavailable")
+	started, err := service.StartLogin(context.Background(), "login-challenge", ports.LoginStartInput{})
+	if err != nil {
+		t.Fatalf("start login: %v", err)
+	}
+	result, err := service.CompleteLogin(context.Background(), transactionFromRedirect(t, started.URL), loginInputFromRedirect(t, started.URL, started.BrowserState, ports.SessionCredentials{CookieValue: "opaque"}))
+	if err != nil {
+		t.Fatalf("complete login: %v", err)
+	}
+	if result.URL != "https://hydra.example/oauth2/auth/rejected" || hydra.loginRejection.Error != "access_denied" {
+		t.Fatalf("failure result = %#v, rejection = %#v", result, hydra.loginRejection)
+	}
+}
+
+func TestService_StartLoginRejectsHydraChallengeMismatch(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, _, _, _ := newTestService(t)
+	hydra.login = domain.LoginRequest{Challenge: "different-challenge", Client: testClient()}
+	if _, err := service.StartLogin(context.Background(), "login-challenge", ports.LoginStartInput{}); !errors.Is(err, domain.ErrInvalidChallenge) {
+		t.Fatalf("error = %v, want invalid challenge", err)
+	}
+}
+
 func TestService_CompleteLoginRejectsInvalidCSRF(t *testing.T) {
 	t.Parallel()
 
@@ -299,6 +328,34 @@ func TestService_ConsentRejectsUnrequestedScope(t *testing.T) {
 	}
 }
 
+func TestService_CompleteConsentRejectsPolicyFailure(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, kratos, policy, _ := newTestService(t)
+	hydra.consent = domain.ConsentRequest{
+		Challenge: "consent-challenge", Client: testClient(), Subject: "operator-1",
+		RequestedScopes: []string{"openid"},
+	}
+	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2"}
+	policy.consentErr = domain.ErrUpstream
+	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
+	if err != nil {
+		t.Fatalf("start consent: %v", err)
+	}
+	result, err := service.CompleteConsent(context.Background(), ConsentInput{
+		Transaction: transactionFromRedirect(t, started.URL),
+		CSRFToken:   queryValue(t, started.URL, "csrf"), BrowserState: started.BrowserState,
+		Decision: "accept", GrantScopes: []string{"openid"},
+		Credentials: ports.SessionCredentials{CookieValue: "opaque"},
+	})
+	if err != nil {
+		t.Fatalf("complete consent: %v", err)
+	}
+	if result.URL != "https://hydra.example/oauth2/consent/rejected" || hydra.consentRejection.Error != "temporarily_unavailable" {
+		t.Fatalf("failure result = %#v, rejection = %#v", result, hydra.consentRejection)
+	}
+}
+
 func TestService_LogoutRejectsUnallowlistedReturnURL(t *testing.T) {
 	t.Parallel()
 
@@ -314,6 +371,130 @@ func TestService_LogoutRejectsUnallowlistedReturnURL(t *testing.T) {
 	}
 	if hydra.logoutAccepted {
 		t.Fatal("logout was accepted with an unallowlisted return URL")
+	}
+}
+
+func TestService_StartLoginSkipsAuthenticationWhenHydraAlreadyAuthenticated(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, _, policy, _ := newTestService(t)
+	service.cfg.RequiredAAL = ""
+	hydra.login = domain.LoginRequest{
+		Challenge: "login-challenge",
+		Client:    testClient(),
+		Subject:   "operator-1",
+		Skip:      true,
+	}
+	policy.loginAllowed = true
+
+	result, err := service.StartLogin(context.Background(), "login-challenge", ports.LoginStartInput{})
+	if err != nil {
+		t.Fatalf("start login: %v", err)
+	}
+	if result.URL != hydra.loginRedirect || hydra.loginAcceptance.Subject != "operator-1" {
+		t.Fatalf("skip result = %#v, acceptance = %#v", result, hydra.loginAcceptance)
+	}
+}
+
+func TestService_CompleteConsentDenyConsumesTransaction(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, _, _, _ := newTestService(t)
+	hydra.consent = domain.ConsentRequest{
+		Challenge: "consent-challenge", Client: testClient(), Subject: "operator-1",
+		RequestedScopes: []string{"openid"},
+	}
+	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
+	if err != nil {
+		t.Fatalf("start consent: %v", err)
+	}
+	input := ConsentInput{
+		Transaction: transactionFromRedirect(t, started.URL),
+		CSRFToken:   queryValue(t, started.URL, "csrf"), BrowserState: started.BrowserState,
+		Decision: "deny",
+	}
+	result, err := service.CompleteConsent(context.Background(), input)
+	if err != nil || result.URL != "https://hydra.example/oauth2/consent/rejected" {
+		t.Fatalf("deny result = %#v, error = %v", result, err)
+	}
+	if hydra.consentRejection.Error != "access_denied" {
+		t.Fatalf("rejection = %#v, want access_denied", hydra.consentRejection)
+	}
+	if _, err := service.CompleteConsent(context.Background(), input); !errors.Is(err, domain.ErrReplay) {
+		t.Fatalf("replay error = %v, want replay", err)
+	}
+}
+
+func TestService_CompleteLogoutAcceptsAndCannotReplay(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, _, _, _ := newTestService(t)
+	hydra.logout = domain.LogoutRequest{Challenge: "logout-challenge", Client: testClient()}
+	started, err := service.StartLogout(context.Background(), "logout-challenge", ports.LogoutStartInput{})
+	if err != nil {
+		t.Fatalf("start logout: %v", err)
+	}
+	input := ports.LogoutInput{
+		Transaction: transactionFromRedirect(t, started.URL),
+		CSRFToken:   queryValue(t, started.URL, "csrf"), BrowserState: started.BrowserState,
+	}
+	result, err := service.CompleteLogout(context.Background(), input)
+	if err != nil || result.URL != hydra.logoutRedirect || !hydra.logoutAccepted {
+		t.Fatalf("logout result = %#v, error = %v, accepted = %t", result, err, hydra.logoutAccepted)
+	}
+	if _, err := service.CompleteLogout(context.Background(), input); !errors.Is(err, domain.ErrReplay) {
+		t.Fatalf("replay error = %v, want replay", err)
+	}
+}
+
+func TestNewServiceRequiresAllCoreDependencies(t *testing.T) {
+	t.Parallel()
+
+	base := Dependencies{
+		Login: &fakeHydra{}, Consent: &fakeHydra{}, Logout: &fakeHydra{},
+		Kratos: &fakeKratos{}, State: state.NewMemoryStore(time.Now), Policy: &fakePolicy{},
+	}
+	tests := []struct {
+		name   string
+		mutate func(*Dependencies)
+	}{
+		{name: "login", mutate: func(deps *Dependencies) { deps.Login = nil }},
+		{name: "consent", mutate: func(deps *Dependencies) { deps.Consent = nil }},
+		{name: "logout", mutate: func(deps *Dependencies) { deps.Logout = nil }},
+		{name: "kratos", mutate: func(deps *Dependencies) { deps.Kratos = nil }},
+		{name: "state", mutate: func(deps *Dependencies) { deps.State = nil }},
+		{name: "policy", mutate: func(deps *Dependencies) { deps.Policy = nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			deps := base
+			tt.mutate(&deps)
+			if _, err := NewService(testConfig(), deps); err == nil {
+				t.Fatal("NewService accepted missing dependency")
+			}
+		})
+	}
+}
+
+func TestServiceReadyStopsAtFirstFailure(t *testing.T) {
+	t.Parallel()
+
+	first := &fakeReadiness{err: domain.ErrUpstream}
+	second := &fakeReadiness{}
+	service, err := NewService(testConfig(), Dependencies{
+		Login: &fakeHydra{}, Consent: &fakeHydra{}, Logout: &fakeHydra{},
+		Kratos: &fakeKratos{}, State: state.NewMemoryStore(time.Now), Policy: &fakePolicy{},
+		Readiness: []ports.Readiness{first, second},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	if err := service.Ready(context.Background()); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("Ready error = %v, want upstream", err)
+	}
+	if second.calls != 0 {
+		t.Fatalf("second readiness checker calls = %d, want 0", second.calls)
 	}
 }
 
@@ -480,6 +661,16 @@ type fakePolicy struct {
 	consentDecision ports.ConsentDecision
 	loginErr        error
 	consentErr      error
+}
+
+type fakeReadiness struct {
+	err   error
+	calls int
+}
+
+func (f *fakeReadiness) Ready(context.Context) error {
+	f.calls++
+	return f.err
 }
 
 func (f *fakePolicy) AuthorizeLogin(context.Context, string, string) (bool, error) {

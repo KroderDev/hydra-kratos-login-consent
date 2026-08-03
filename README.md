@@ -167,9 +167,11 @@ and policy configuration.
 The container listens on port `8080` by default. Its Docker healthcheck calls
 `/healthz`; orchestration readiness probes should call `/readyz`. Readiness
 checks Hydra and Kratos and also Redis/Valkey when `STATE_STORE=redis`; it does
-not call the HTTP policy endpoint. See the [deployment image contract](docs/deployment.md#image-supply-chain)
-before using a registry artifact. The local Dockerfile build does not provide
-a registry signature or attestation.
+not call the HTTP policy endpoint. The release workflow publishes verified
+multi-architecture images to GHCR. Deployments must pin the published digest
+and verify its Cosign signature, SPDX SBOM, and SLSA provenance. See the
+[image release and verification guide](docs/release.md) and the
+[deployment image contract](docs/deployment.md#image-supply-chain).
 
 ## License
 

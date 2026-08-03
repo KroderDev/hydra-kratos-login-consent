@@ -139,40 +139,39 @@ reverse-proxy, ingress, tracing, error-reporting, and debugging systems.
 
 ## Image Supply Chain
 
-The repository has a production Dockerfile and binary release automation. A
-container release workflow must fulfill the following image deployment contract
-before a registry artifact is used:
+The container release workflow publishes the production image to GHCR after
+building and scanning both supported platforms. The deployment contract is:
 
 - The image repository is `ghcr.io/kroderdev/hydra-kratos-login-consent`.
 - Deployments refer to an immutable digest, for example
   `ghcr.io/kroderdev/hydra-kratos-login-consent@sha256:<digest>`, rather than a
   moving tag such as `latest`.
-- A release workflow publishes a verifiable signature for that exact image
-  digest. Verification pins the workflow's documented signing identity and OIDC
-  issuer, or an explicitly documented trusted key.
-- The release workflow publishes a verifiable SBOM attestation whose subject is
-  the exact image digest.
-- A release workflow publishes a verifiable build-provenance attestation whose
+- The release workflow publishes a verifiable keyless Cosign signature for that
+  exact image digest. Verification pins the container workflow identity and
+  `https://token.actions.githubusercontent.com` as the OIDC issuer.
+- The release workflow publishes verifiable SBOM attestations whose subjects
+  are the exact platform image digests.
+- The release workflow publishes a verifiable SLSA provenance attestation whose
   subject is the exact image digest and whose source, ref, and builder satisfy
-  the organization's release policy.
+  the release policy.
 - A deployment records the selected digest and verification results so a
   rollback can return to the same immutable artifact.
 
-The release workflow must document the verification commands and exact signing
-identity. They are not provided by the local Dockerfile build.
+Verification commands and the exact workflow identity are maintained in
+[Image Release And Verification](release.md):
 
 ```sh
 IMAGE=ghcr.io/kroderdev/hydra-kratos-login-consent@sha256:<published-digest>
 
 cosign verify \
-  --certificate-identity <documented-release-identity> \
-  --certificate-oidc-issuer <documented-release-issuer> \
+  --certificate-identity <release-workflow-identity> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   "$IMAGE"
 
 ```
 
-The workflow must also provide equivalent SBOM and provenance verification
-commands for the exact image digest.
+See [Image Release And Verification](release.md) for the platform-specific
+SBOM verification loop and the provenance verification command.
 
 Do not replace the digest with a tag after verification. The local Dockerfile
 build remains available for source-based deployments; it does not by itself

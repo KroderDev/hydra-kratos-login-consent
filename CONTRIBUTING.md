@@ -19,8 +19,9 @@ golangci-lint run ./...
 govulncheck ./...
 ```
 
-Do not add Docker or Kubernetes packaging until the runtime contract and
-production state adapter are approved.
+Keep deployment packaging and platform examples aligned with
+`docs/deployment.md`; do not add platform-specific resources that contradict
+the documented runtime contract.
 
 ## Design Rules
 

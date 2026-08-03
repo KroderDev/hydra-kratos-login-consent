@@ -26,7 +26,8 @@
 ## State And Configuration
 
 - Configuration is environment-based; see `README.md` for the supported variables.
-- `STATE_STORE` currently supports only `memory`; production mode rejects it.
+- `STATE_STORE` supports `memory` for local development/tests and `redis` for
+  secure or shared deployments; secure environments reject `memory`.
 - The in-memory transaction store is for local development and tests, not replica
   deployments. Shared Redis/Valkey state is required for release deployment.
 - Do not put customer-specific authorization rules in the generic core; implement

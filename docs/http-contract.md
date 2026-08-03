@@ -36,9 +36,9 @@ redirect.
    - `flow=consent`
    - `transaction=<opaque handle>`
    - `csrf=<opaque single-use token>`
-    - `client_name=<display name>`
-    - `scope=<space-separated validated scopes>`
-    - `skip_consent=true` when configured first-party policy permits an automatic UI submission
+   - `client_name=<display name>`
+   - `scope=<space-separated validated scopes>`
+   - `skip_consent=true` when configured first-party policy permits an automatic UI submission
    - `return_to=<fixed provider consent endpoint>`
 
 4. The UI submits `POST /consent` as a form with `transaction`, `csrf`,
@@ -62,7 +62,9 @@ the Hydra logout challenge.
 ## Operational Endpoints
 
 - `GET /healthz` reports process liveness.
-- `GET /readyz` checks configured Hydra and Kratos readiness adapters.
+- `GET /readyz` checks Hydra and Kratos readiness and also checks the configured
+  Redis/Valkey store when `STATE_STORE=redis`. It does not call the HTTP policy
+  endpoint.
 
 All responses set no-store and browser hardening headers. Error bodies contain
 stable public error codes rather than upstream details.

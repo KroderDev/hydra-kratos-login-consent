@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.3.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.2.0...v0.3.0) (2026-08-03)
+
+
+### Features
+
+* **policy:** add versioned HTTP policy backend ([7dca99c](https://github.com/KroderDev/hydra-kratos-login-consent/commit/7dca99cc0c3ea7eeda090b027ac88dff0c4320d1))
+* **policy:** add versioned HTTP policy backend ([13c3c3a](https://github.com/KroderDev/hydra-kratos-login-consent/commit/13c3c3a0efc9a9fb82799e88c236854989176808))
+
+
+### Bug Fixes
+
+* **policy:** address review feedback ([b229be6](https://github.com/KroderDev/hydra-kratos-login-consent/commit/b229be6a6cc27f7dd95980c76563ede1f2366817))
+* **release:** harden immutable image promotion ([89a62b4](https://github.com/KroderDev/hydra-kratos-login-consent/commit/89a62b48abb27de100d0a5438d00bd705e38dea1))
+
+
+### Build System
+
+* **container:** cross-compile multi-arch images ([0e77837](https://github.com/KroderDev/hydra-kratos-login-consent/commit/0e778373dfba3358239e124ee5c48fdce80d3498))
+
+
+### Dependencies
+
+* **deps:** bump redis in the compose-non-major group ([514b2bc](https://github.com/KroderDev/hydra-kratos-login-consent/commit/514b2bcc76a0171c0ccc2c6769471aac7082337c))
+
+
+### Documentation
+
+* **deployment:** document production runtime contract ([5738950](https://github.com/KroderDev/hydra-kratos-login-consent/commit/573895089e85caaac00edaf89800e59f423993bb))
+* **deployment:** document production runtime contract ([404ab3e](https://github.com/KroderDev/hydra-kratos-login-consent/commit/404ab3e4c72ab6878bd782bee4c47098e7dcc33f))
+* **release:** clarify tag immutability contract ([08d88fa](https://github.com/KroderDev/hydra-kratos-login-consent/commit/08d88fa8a9207e3f45c6049e165ac4cb5c1e4c18))
+
+
+### Tests
+
+* **policy:** cover remote authorization failure modes ([4608b8b](https://github.com/KroderDev/hydra-kratos-login-consent/commit/4608b8b1c8f39ef5db717402ec60abe0d30e70f4))
+* **policy:** cover remote authorization failure modes ([baef6c4](https://github.com/KroderDev/hydra-kratos-login-consent/commit/baef6c4dbc771479a00d2b8581b861e8caa3bf50))
+
+
+### Continuous Integration
+
+* add pull request labeler workflow and configuration ([532e263](https://github.com/KroderDev/hydra-kratos-login-consent/commit/532e263c98622b21bda43141fd3ce59e38cffdff))
+* **release:** isolate container promotion approvals ([15d9adf](https://github.com/KroderDev/hydra-kratos-login-consent/commit/15d9adf999ea6ae8d6d6c4f0d6179c8976a418f8))
+* **release:** publish signed OCI images ([a9d3b19](https://github.com/KroderDev/hydra-kratos-login-consent/commit/a9d3b19dfd5ddd40c3432d9ccdc8216382c721e7))
+* **release:** skip duplicate multi-arch image tests ([a7451e2](https://github.com/KroderDev/hydra-kratos-login-consent/commit/a7451e2fbd6a151958713d0b9603d4ee97285b5e))
+
 ## [0.2.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.1.0...v0.2.0) (2026-08-03)
 
 

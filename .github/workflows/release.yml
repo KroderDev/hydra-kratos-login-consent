@@ -11,8 +11,6 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    environment:
-      name: release
     permissions:
       contents: write
 

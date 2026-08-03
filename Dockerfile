@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.26.0-bookworm AS dependencies
+FROM golang:1.26.5-bookworm AS dependencies
 
 WORKDIR /src
 
@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o /out/server \
     ./cmd/server
 
-FROM alpine:3.22.1 AS runtime
+FROM alpine:3.24.1 AS runtime
 
 RUN addgroup -S app \
     && adduser -S -G app -h /nonexistent -s /sbin/nologin app

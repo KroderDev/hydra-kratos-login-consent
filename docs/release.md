@@ -19,9 +19,10 @@ Deployments must use the digest of the verified multi-architecture image:
 ghcr.io/kroderdev/hydra-kratos-login-consent@sha256:<digest>
 ```
 
-The workflow also creates write-once `vX.Y.Z` and `sha-<commit>` aliases for
-the same digest. It never publishes or requires a `latest` tag. A release rerun
-must refuse to replace an existing alias with a different digest.
+The workflow creates a write-once `vX.Y.Z` alias for the same digest. The digest
+is the canonical deployment reference; the workflow never publishes or requires
+`latest` or mutable commit aliases. A release rerun must refuse to replace an
+existing version tag with a different digest.
 
 ## Verification
 
@@ -68,10 +69,15 @@ to the same artifact.
 
 ## Release Controls
 
-The `container-publish` GitHub environment must be protected with required
-reviewers and restricted to trusted `v*` tags. The workflow requires no Docker
-Hub credentials, Cosign private key, or other signing secret. GHCR access uses
-the workflow `GITHUB_TOKEN`; signing and attestations use short-lived OIDC
+Before the first release, a repository administrator must configure the
+`container-publish` GitHub environment with required reviewers, prevent
+self-review, and a deployment branch policy that allows only trusted `v*` tags.
+Git tags matching `v*` must also be protected from deletion and updates. These
+are repository settings and cannot be represented by workflow YAML; the
+workflow itself fails closed when it cannot prove that a version tag is absent
+or already points to the expected digest. The workflow requires no Docker Hub
+credentials, Cosign private key, or other signing secret. GHCR access uses the
+workflow `GITHUB_TOKEN`; signing and attestations use short-lived OIDC
 credentials.
 
 The candidate is scanned for unfixed `HIGH` and `CRITICAL` vulnerabilities on

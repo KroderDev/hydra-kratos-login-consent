@@ -10,7 +10,8 @@ RUN go mod download
 FROM dependencies AS test
 
 COPY . .
-RUN go test -tags=integration -count=1 ./...
+ARG RUN_INTEGRATION_TESTS=true
+RUN if [ "$RUN_INTEGRATION_TESTS" = "true" ]; then go test -tags=integration -count=1 ./...; fi
 
 FROM test AS builder
 

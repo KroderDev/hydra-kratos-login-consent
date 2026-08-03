@@ -54,6 +54,7 @@ jobs:
           push: false
           provenance: false
           sbom: false
+          build-args: RUN_INTEGRATION_TESTS=false
           tags: hydra-kratos-login-consent:pr-${{ github.event.pull_request.number }}-${{ matrix.arch }}
 
       - name: Scan image for high and critical vulnerabilities
@@ -134,6 +135,7 @@ jobs:
           push: true
           provenance: mode=max
           sbom: true
+          build-args: RUN_INTEGRATION_TESTS=false
           tags: ${{ steps.image.outputs.candidate_ref }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}

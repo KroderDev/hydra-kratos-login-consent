@@ -90,6 +90,21 @@ func TestE2E_LoginConsentLogout(t *testing.T) {
 	}
 }
 
+func TestE2E_HealthAndReadiness(t *testing.T) {
+	fixture := newFixture(t)
+
+	healthResponse := fixture.get(t, "/healthz")
+	if healthResponse.StatusCode != http.StatusOK {
+		t.Fatalf("health status = %d, want %d", healthResponse.StatusCode, http.StatusOK)
+	}
+
+	readinessResponse := fixture.get(t, "/readyz")
+	if readinessResponse.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(readinessResponse.Body)
+		t.Fatalf("readiness status = %d, want %d; body = %s", readinessResponse.StatusCode, http.StatusOK, body)
+	}
+}
+
 func TestE2E_ConsentOriginAndReplayProtection(t *testing.T) {
 	fixture := newFixture(t)
 	start := fixture.get(t, "/consent?consent_challenge=consent-challenge")
@@ -189,6 +204,10 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(hydraServer.Close)
 
 	kratosServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/health/ready" {
+			writeStatus(w, http.StatusOK)
+			return
+		}
 		if r.URL.Path != "/sessions/whoami" {
 			http.NotFound(w, r)
 			return
@@ -264,12 +283,13 @@ func newFixture(t *testing.T) *fixture {
 	}
 	providerPolicy := e2ePolicy{}
 	service, err := application.NewService(cfg, application.Dependencies{
-		Login:   hydraClient,
-		Consent: hydraClient,
-		Logout:  hydraClient,
-		Kratos:  kratosClient,
-		State:   transactionStore,
-		Policy:  providerPolicy,
+		Login:     hydraClient,
+		Consent:   hydraClient,
+		Logout:    hydraClient,
+		Kratos:    kratosClient,
+		State:     transactionStore,
+		Policy:    providerPolicy,
+		Readiness: []ports.Readiness{hydraClient, kratosClient, transactionStore},
 	})
 	if err != nil {
 		t.Fatalf("create provider service: %v", err)
@@ -350,6 +370,8 @@ func (f *hydraFixture) redirect(path string) string {
 
 func (f *hydraFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/health/ready":
+		writeStatus(w, http.StatusOK)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/oauth2/auth/requests/login":
 		writeJSONNoTest(w, map[string]any{
 			"challenge": r.URL.Query().Get("login_challenge"),

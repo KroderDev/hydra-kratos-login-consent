@@ -10,7 +10,7 @@ RUN go mod download
 FROM dependencies AS test
 
 COPY . .
-RUN go test ./...
+RUN go test -tags=integration -count=1 ./...
 
 FROM test AS builder
 

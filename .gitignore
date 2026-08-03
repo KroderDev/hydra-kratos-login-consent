@@ -1,0 +1,39 @@
+# Go build and test output
+/bin/
+/dist/
+/coverage.out
+/coverage.html
+*.test
+*.prof
+*.cover
+*.coverprofile
+/server
+/*.exe
+/*.dll
+/*.so
+/*.dylib
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
+
+# Local test artifacts
+/tmp/
+/test-results/
+
+# Local logs and tooling state
+*.log
+.direnv/
+
+# Temporary files
+*.swp
+*.swo
+*~

@@ -43,6 +43,7 @@ func TestE2E_LoginConsentLogout(t *testing.T) {
 
 	callback := fixture.request(t, http.MethodGet, "/login/callback?transaction="+url.QueryEscape(loginTransaction)+"&csrf="+url.QueryEscape(loginCSRF)+"&remember=true&remember_for=3600", nil)
 	callback.AddCookie(&http.Cookie{Name: "ory_kratos_session", Value: "session-value"})
+	callback.AddCookie(cookieNamed(t, loginResponse, "provider_login_state"))
 	callbackResponse := fixture.do(t, callback)
 	if got := requireRedirect(t, callbackResponse).String(); got != fixture.hydra.redirect("oauth2/auth/callback") {
 		t.Fatalf("login callback redirect = %q, want Hydra redirect", got)
@@ -70,6 +71,7 @@ func TestE2E_LoginConsentLogout(t *testing.T) {
 	consentRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	consentRequest.Header.Set("Origin", "https://ui.example")
 	consentRequest.AddCookie(&http.Cookie{Name: "ory_kratos_session", Value: "session-value"})
+	consentRequest.AddCookie(cookieNamed(t, consentResponse, "provider_consent_state"))
 	consentResult := fixture.do(t, consentRequest)
 	if got := requireRedirect(t, consentResult).String(); got != fixture.hydra.redirect("oauth2/consent/callback") {
 		t.Fatalf("consent redirect = %q, want Hydra redirect", got)
@@ -82,7 +84,17 @@ func TestE2E_LoginConsentLogout(t *testing.T) {
 	}
 
 	logoutResponse := fixture.get(t, "/logout?logout_challenge=logout-challenge")
-	if got := requireRedirect(t, logoutResponse).String(); got != fixture.hydra.redirect("oauth2/logout/callback") {
+	logoutLocation := requireRedirect(t, logoutResponse)
+	logoutForm := url.Values{
+		"transaction": {logoutLocation.Query().Get("transaction")},
+		"csrf":        {logoutLocation.Query().Get("csrf")},
+	}
+	logoutRequest := fixture.request(t, http.MethodPost, "/logout", strings.NewReader(logoutForm.Encode()))
+	logoutRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	logoutRequest.Header.Set("Origin", "https://ui.example")
+	logoutRequest.AddCookie(cookieNamed(t, logoutResponse, "provider_logout_state"))
+	logoutResult := fixture.do(t, logoutRequest)
+	if got := requireRedirect(t, logoutResult).String(); got != fixture.hydra.redirect("oauth2/logout/callback") {
 		t.Fatalf("logout redirect = %q, want Hydra redirect", got)
 	}
 	if !fixture.hydra.logoutAccepted {
@@ -135,6 +147,7 @@ func TestE2E_ConsentOriginAndReplayProtection(t *testing.T) {
 	validRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	validRequest.Header.Set("Origin", "https://ui.example")
 	validRequest.AddCookie(&http.Cookie{Name: "ory_kratos_session", Value: "session-value"})
+	validRequest.AddCookie(cookieNamed(t, start, "provider_consent_state"))
 	validResponse := fixture.do(t, validRequest)
 	if validResponse.StatusCode != http.StatusFound {
 		t.Fatalf("valid consent status = %d, want %d", validResponse.StatusCode, http.StatusFound)
@@ -144,6 +157,7 @@ func TestE2E_ConsentOriginAndReplayProtection(t *testing.T) {
 	replayRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	replayRequest.Header.Set("Origin", "https://ui.example")
 	replayRequest.AddCookie(&http.Cookie{Name: "ory_kratos_session", Value: "session-value"})
+	replayRequest.AddCookie(cookieNamed(t, start, "provider_consent_state"))
 	replayResponse := fixture.do(t, replayRequest)
 	if replayResponse.StatusCode != http.StatusBadRequest {
 		t.Fatalf("replay status = %d, want %d", replayResponse.StatusCode, http.StatusBadRequest)
@@ -164,6 +178,7 @@ func TestE2E_ConsentRejectsUnrequestedScope(t *testing.T) {
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Origin", "https://ui.example")
 	request.AddCookie(&http.Cookie{Name: "ory_kratos_session", Value: "session-value"})
+	request.AddCookie(cookieNamed(t, start, "provider_consent_state"))
 	response := fixture.do(t, request)
 	if response.StatusCode != http.StatusFound {
 		t.Fatalf("invalid scope status = %d, want %d Hydra rejection redirect", response.StatusCode, http.StatusFound)
@@ -266,6 +281,7 @@ func newFixture(t *testing.T) *fixture {
 				AllowedRedirectURIs:        []string{"https://client.example/callback"},
 				AllowedPostLogoutRedirects: []string{"https://client.example/logout"},
 				AllowedScopes:              []string{"openid", "profile"},
+				AllowedAudiences:           []string{"example-api"},
 				AllowedIDTokenClaims: map[string][]string{
 					"email": nil,
 					"role":  {"profile"},
@@ -331,6 +347,17 @@ func (f *fixture) do(t *testing.T, request *http.Request) *http.Response {
 	}
 	t.Cleanup(func() { _ = response.Body.Close() })
 	return response
+}
+
+func cookieNamed(t *testing.T, response *http.Response, name string) *http.Cookie {
+	t.Helper()
+	for _, cookie := range response.Cookies() {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	t.Fatalf("response did not set %s cookie", name)
+	return nil
 }
 
 func requireRedirect(t *testing.T, response *http.Response) *url.URL {
@@ -447,8 +474,9 @@ func (f *hydraFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			"challenge":   r.URL.Query().Get("logout_challenge"),
 			"request_url": requestURL,
 			"client": map[string]any{
-				"client_id":     "example-client",
-				"redirect_uris": []string{"https://client.example/callback"},
+				"client_id":                 "example-client",
+				"redirect_uris":             []string{"https://client.example/callback"},
+				"post_logout_redirect_uris": []string{"https://client.example/logout"},
 			},
 		})
 	case r.Method == http.MethodPut && r.URL.Path == "/admin/oauth2/auth/requests/logout/accept":
@@ -467,7 +495,7 @@ func (e2ePolicy) AuthorizeLogin(context.Context, string, string) (bool, error) {
 	return true, nil
 }
 
-func (e2ePolicy) AuthorizeConsent(context.Context, string, string, []string) (ports.ConsentDecision, error) {
+func (e2ePolicy) AuthorizeConsent(context.Context, string, string, []string, []string) (ports.ConsentDecision, error) {
 	return ports.ConsentDecision{
 		Allowed: true,
 		Claims: domain.Claims{IDToken: map[string]any{

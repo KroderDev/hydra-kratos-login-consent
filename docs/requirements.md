@@ -70,6 +70,8 @@ may use a particular OAuth client and scope set.
 - The service MUST validate redirect and return URLs against configured
   allowlists.
 - The service MUST create a short-lived, single-use browser transaction.
+- The service MUST bind every browser transaction to a provider-issued
+  browser-state cookie.
 - The service MUST redirect the browser to a configured external UI origin.
 - The service MUST validate the Kratos session after the browser returns.
 - The service MUST support a configurable required AAL.
@@ -83,6 +85,10 @@ may use a particular OAuth client and scope set.
 
 - The service MUST retrieve the consent challenge from Hydra admin.
 - The service MUST validate the OAuth client and requested scopes.
+- The service MUST validate requested token audiences against client and policy
+  allowlists.
+- The service MUST validate the configured assurance level on every consent
+  acceptance path.
 - The service MUST not grant scopes that are not allowed for the client.
 - The service MUST invoke the authorization policy before accepting consent.
 - The service MUST allow the policy to add application-specific ID-token claims.
@@ -96,6 +102,8 @@ may use a particular OAuth client and scope set.
 - The service MUST validate post-logout return URLs.
 - The service MUST redirect only to configured external UI or client origins.
 - The service MUST not implement an open redirect.
+- Logout completion MUST use browser-bound CSRF proof and an external UI Origin
+  check.
 
 ## External UI Requirements
 
@@ -137,6 +145,7 @@ able to:
 
 - Authorize a login for a subject and OAuth client.
 - Authorize consent for a subject, client, and requested scopes.
+- Restrict token audiences for that subject, client, and scope set.
 - Return claims appropriate for that client and scope set.
 
 The initial default policy MAY be a static allowlist for local development. A
@@ -156,7 +165,10 @@ The implementation MUST support configuration for:
 - Allowed OAuth clients.
 - Allowed redirect URIs.
 - Allowed scopes.
+- Allowed token audiences.
 - Transaction lifetime.
+- Pending transaction quota.
+- Environment-specific transport and state-store policy.
 - Policy implementation.
 - Logging level.
 
@@ -174,6 +186,7 @@ The initial public surface is expected to include:
 | `GET` | `/consent` | Inspect a consent challenge |
 | `POST` | `/consent` | Accept or reject consent |
 | `GET` | `/logout` | Complete a validated logout flow |
+| `POST` | `/logout` | Complete browser-bound logout |
 | `GET` | `/healthz` | Liveness check |
 | `GET` | `/readyz` | Dependency readiness check |
 

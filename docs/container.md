@@ -12,9 +12,11 @@ docker build --tag hydra-kratos-login-consent:local .
 ```
 
 Supply configuration and secrets at runtime. Do not copy `.env` files or
-credentials into the image. A production deployment must use
-`ENVIRONMENT=production` and `STATE_STORE=redis` with a shared `REDIS_URL`;
-the in-memory store is intended only for local development and tests.
+credentials into the image. A production deployment must use HTTPS endpoints,
+Hydra admin authentication, `ENVIRONMENT=production`, `STATE_STORE=redis`,
+`rediss://` Redis with a non-empty environment-specific prefix, and explicit
+`ALLOWED_SUBJECT_SCOPES`; the in-memory store is intended only for local
+development and tests.
 
 The server listens on `:8080` by default. `/healthz` is used by the image
 healthcheck and reports process health. Use `/readyz` for an orchestrator

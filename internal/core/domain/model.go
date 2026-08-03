@@ -11,6 +11,7 @@ type Flow string
 const (
 	FlowLogin   Flow = "login"
 	FlowConsent Flow = "consent"
+	FlowLogout  Flow = "logout"
 )
 
 // Client is the provider-owned subset of an OAuth client registration.
@@ -69,8 +70,10 @@ type Transaction struct {
 	Flow              Flow
 	Challenge         string
 	CSRFToken         string
+	BrowserState      string
 	ClientID          string
 	Subject           string
+	RequestedAAL      string
 	RequestedScopes   []string
 	RequestedAudience []string
 	RequiredAAL       string
@@ -85,6 +88,13 @@ func AALAtLeast(actual, required string) bool {
 	actualLevel, actualOK := aalLevel(actual)
 	requiredLevel, requiredOK := aalLevel(required)
 	return actualOK && requiredOK && actualLevel >= requiredLevel
+}
+
+// SupportedAAL reports whether value is one of the assurance levels enforced
+// by this provider.
+func SupportedAAL(value string) bool {
+	_, ok := aalLevel(value)
+	return ok
 }
 
 // HigherAAL returns the stronger known assurance value.

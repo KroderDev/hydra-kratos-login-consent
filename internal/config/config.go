@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,12 +42,23 @@ func Load() (coreconfig.Config, error) {
 		return coreconfig.Config{}, err
 	}
 
-	ttl := 5 * time.Minute
+	ttl := coreconfig.DefaultTransactionTTL
 	if value := strings.TrimSpace(os.Getenv("TRANSACTION_TTL")); value != "" {
 		ttl, err = time.ParseDuration(value)
 		if err != nil {
 			return coreconfig.Config{}, fmt.Errorf("parse transaction_ttl: %w", err)
 		}
+	}
+	maxPendingTransactions := coreconfig.DefaultMaxPendingTransactions
+	if value := strings.TrimSpace(os.Getenv("MAX_PENDING_TRANSACTIONS")); value != "" {
+		maxPendingTransactions, err = strconv.Atoi(value)
+		if err != nil {
+			return coreconfig.Config{}, fmt.Errorf("parse max_pending_transactions: %w", err)
+		}
+	}
+	environment := strings.ToLower(strings.TrimSpace(os.Getenv("ENVIRONMENT")))
+	if environment == "" {
+		environment = "development"
 	}
 
 	clients := map[string]coreconfig.Client{}
@@ -63,16 +75,18 @@ func Load() (coreconfig.Config, error) {
 	}
 
 	cfg := coreconfig.Config{
-		ListenAddress:       envOrDefault("LISTEN_ADDR", ":8080"),
-		ProviderURL:         providerURL,
-		ExternalUIURL:       externalUIURL,
-		HydraAdminURL:       hydraAdminURL,
-		HydraPublicURL:      hydraPublicURL,
-		KratosPublicURL:     kratosPublicURL,
-		KratosSessionCookie: envOrDefault("KRATOS_SESSION_COOKIE", "ory_kratos_session"),
-		RequiredAAL:         envOrDefault("REQUIRED_AAL", "aal2"),
-		TransactionTTL:      ttl,
-		Clients:             clients,
+		ListenAddress:          envOrDefault("LISTEN_ADDR", ":8080"),
+		Environment:            environment,
+		ProviderURL:            providerURL,
+		ExternalUIURL:          externalUIURL,
+		HydraAdminURL:          hydraAdminURL,
+		HydraPublicURL:         hydraPublicURL,
+		KratosPublicURL:        kratosPublicURL,
+		KratosSessionCookie:    envOrDefault("KRATOS_SESSION_COOKIE", "ory_kratos_session"),
+		RequiredAAL:            envOrDefault("REQUIRED_AAL", "aal2"),
+		TransactionTTL:         ttl,
+		MaxPendingTransactions: maxPendingTransactions,
+		Clients:                clients,
 	}
 	if err := cfg.Validate(); err != nil {
 		return coreconfig.Config{}, err

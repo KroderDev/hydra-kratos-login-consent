@@ -10,9 +10,11 @@ import (
 
 // Static authorizes an explicit subject and optional client allowlist.
 type Static struct {
-	Subjects map[string]struct{}
-	Clients  map[string]struct{}
-	Claims   domain.Claims
+	Subjects      map[string]struct{}
+	Clients       map[string]struct{}
+	SubjectScopes map[string]map[string]map[string]struct{}
+	RequireScopes bool
+	Claims        domain.Claims
 }
 
 var _ ports.Policy = (*Static)(nil)
@@ -25,14 +27,44 @@ func NewStatic(subjects, clients []string) *Static {
 	}
 }
 
+// NewStaticWithScopes creates a static policy with optional subject/client
+// scope rules. Production composition should require these rules explicitly.
+func NewStaticWithScopes(subjects, clients []string, scopeRules map[string]map[string][]string, requireScopes bool) *Static {
+	policy := NewStatic(subjects, clients)
+	policy.SubjectScopes = toScopeSet(scopeRules)
+	policy.RequireScopes = requireScopes
+	return policy
+}
+
 // AuthorizeLogin evaluates the static subject and client allowlists.
 func (p *Static) AuthorizeLogin(_ context.Context, subject, clientID string) (bool, error) {
 	return p.allowed(subject, clientID), nil
 }
 
 // AuthorizeConsent evaluates the same static policy for requested scopes.
-func (p *Static) AuthorizeConsent(_ context.Context, subject, clientID string, _ []string) (ports.ConsentDecision, error) {
-	return ports.ConsentDecision{Allowed: p.allowed(subject, clientID), Claims: cloneClaims(p.Claims)}, nil
+func (p *Static) AuthorizeConsent(_ context.Context, subject, clientID string, scopes, audiences []string) (ports.ConsentDecision, error) {
+	allowed := p.allowed(subject, clientID)
+	if allowed {
+		for _, audience := range audiences {
+			if audience == "" {
+				allowed = false
+				break
+			}
+		}
+	}
+	if allowed && p.RequireScopes {
+		clientScopes, ok := p.SubjectScopes[subject][clientID]
+		if !ok {
+			allowed = false
+		}
+		for _, scope := range scopes {
+			if _, ok := clientScopes[scope]; !ok {
+				allowed = false
+				break
+			}
+		}
+	}
+	return ports.ConsentDecision{Allowed: allowed, Claims: cloneClaims(p.Claims)}, nil
 }
 
 func (p *Static) allowed(subject, clientID string) bool {
@@ -51,6 +83,17 @@ func toSet(values []string) map[string]struct{} {
 	for _, value := range values {
 		if value != "" {
 			result[value] = struct{}{}
+		}
+	}
+	return result
+}
+
+func toScopeSet(values map[string]map[string][]string) map[string]map[string]map[string]struct{} {
+	result := make(map[string]map[string]map[string]struct{}, len(values))
+	for subject, clients := range values {
+		result[subject] = make(map[string]map[string]struct{}, len(clients))
+		for client, scopes := range clients {
+			result[subject][client] = toSet(scopes)
 		}
 	}
 	return result

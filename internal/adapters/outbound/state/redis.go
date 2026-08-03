@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,7 +15,9 @@ import (
 	redisclient "github.com/redis/go-redis/v9"
 )
 
-const defaultKeyPrefix = "transaction:"
+const defaultKeyPrefix = "hydra-kratos-login-consent:transaction:"
+
+const maxTransactionBytes = 64 << 10
 
 var consumeScript = redisclient.NewScript(`
 local value = redis.call("GET", KEYS[1])
@@ -37,10 +41,23 @@ var (
 
 // NewRedisStore creates a transaction store from a redis:// or rediss:// URL.
 func NewRedisStore(redisURL, keyPrefix string) (*RedisStore, error) {
-	options, err := redisclient.ParseURL(strings.TrimSpace(redisURL))
-	if err != nil {
-		return nil, fmt.Errorf("parse redis URL: %w", err)
+	redisURL = strings.TrimSpace(redisURL)
+	if err := ValidateRedisURL(redisURL, false); err != nil {
+		return nil, err
 	}
+	options, err := redisclient.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse redis URL %q", redactRedisURL(redisURL))
+	}
+	options.ContextTimeoutEnabled = true
+	options.DialTimeout = 3 * time.Second
+	options.ReadTimeout = 3 * time.Second
+	options.WriteTimeout = 3 * time.Second
+	options.PoolTimeout = 3 * time.Second
+	options.MaxRetries = 1
+	options.PoolSize = 32
+	options.MaxActiveConns = 64
+	options.MaxIdleConns = 16
 	if keyPrefix == "" {
 		keyPrefix = defaultKeyPrefix
 	}
@@ -51,6 +68,25 @@ func NewRedisStore(redisURL, keyPrefix string) (*RedisStore, error) {
 	}, nil
 }
 
+// ValidateRedisURL validates the Redis transport settings before credentials
+// are handed to the client library.
+func ValidateRedisURL(redisURL string, requireTLS bool) error {
+	parsed, err := url.Parse(strings.TrimSpace(redisURL))
+	if err != nil {
+		return fmt.Errorf("parse redis URL: invalid URL")
+	}
+	if parsed.Scheme != "redis" && parsed.Scheme != "rediss" {
+		return fmt.Errorf("redis URL must use redis or rediss scheme")
+	}
+	if requireTLS && parsed.Scheme != "rediss" {
+		return fmt.Errorf("redis URL must use rediss outside development and test")
+	}
+	if skipVerify, err := strconv.ParseBool(parsed.Query().Get("skip_verify")); err == nil && skipVerify {
+		return fmt.Errorf("redis URL must not disable TLS certificate verification")
+	}
+	return nil
+}
+
 // Create stores a transaction with an opaque handle and Redis expiry.
 func (s *RedisStore) Create(ctx context.Context, transaction domain.Transaction) (string, error) {
 	if transaction.ExpiresAt.IsZero() || !transaction.ExpiresAt.After(s.now()) {
@@ -59,6 +95,9 @@ func (s *RedisStore) Create(ctx context.Context, transaction domain.Transaction)
 	payload, err := json.Marshal(cloneTransaction(transaction))
 	if err != nil {
 		return "", fmt.Errorf("marshal transaction: %w", err)
+	}
+	if len(payload) > maxTransactionBytes {
+		return "", fmt.Errorf("transaction exceeds %d byte limit", maxTransactionBytes)
 	}
 	ttl := transaction.ExpiresAt.Sub(s.now())
 	if ttl <= 0 {
@@ -78,6 +117,28 @@ func (s *RedisStore) Create(ctx context.Context, transaction domain.Transaction)
 		}
 	}
 	return "", domain.ErrUpstream
+}
+
+// Get returns an unexpired transaction without consuming it.
+func (s *RedisStore) Get(ctx context.Context, handle string) (domain.Transaction, error) {
+	if handle == "" {
+		return domain.Transaction{}, domain.ErrInvalidTransaction
+	}
+	payload, err := s.client.Get(ctx, s.key(handle)).Result()
+	if err != nil {
+		if errors.Is(err, redisclient.Nil) {
+			return domain.Transaction{}, domain.ErrReplay
+		}
+		return domain.Transaction{}, fmt.Errorf("get transaction from redis: %w", err)
+	}
+	var transaction domain.Transaction
+	if err := json.Unmarshal([]byte(payload), &transaction); err != nil {
+		return domain.Transaction{}, fmt.Errorf("unmarshal transaction: %w", err)
+	}
+	if !transaction.ExpiresAt.After(s.now()) {
+		return domain.Transaction{}, domain.ErrExpiredTransaction
+	}
+	return cloneTransaction(transaction), nil
 }
 
 // Consume atomically removes and returns an unexpired transaction.
@@ -127,4 +188,15 @@ func (s *RedisStore) Close() error {
 
 func (s *RedisStore) key(handle string) string {
 	return s.keyPrefix + handle
+}
+
+func redactRedisURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "<redacted redis url>"
+	}
+	if parsed.User != nil {
+		parsed.User = url.User(parsed.User.Username())
+	}
+	return parsed.String()
 }

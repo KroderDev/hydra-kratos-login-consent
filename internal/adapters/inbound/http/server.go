@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -22,11 +23,22 @@ import (
 )
 
 const maxFormBytes = 32 << 10
+const maxInFlightRequests = 128
+const requestBudget = 12 * time.Second
+const requestRatePerSecond = 64
+
+const (
+	loginBrowserStateCookie   = "provider_login_state"
+	consentBrowserStateCookie = "provider_consent_state"
+	logoutBrowserStateCookie  = "provider_logout_state"
+)
 
 type Server struct {
-	service ports.Provider
-	cfg     config.Config
-	logger  *slog.Logger
+	service  ports.Provider
+	cfg      config.Config
+	logger   *slog.Logger
+	inFlight chan struct{}
+	rate     *requestLimiter
 }
 
 type requestIDContextKey struct{}
@@ -42,7 +54,13 @@ func New(service ports.Provider, cfg config.Config, logger *slog.Logger) (*Serve
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{service: service, cfg: cfg, logger: logger}, nil
+	return &Server{
+		service:  service,
+		cfg:      cfg,
+		logger:   logger,
+		inFlight: make(chan struct{}, maxInFlightRequests),
+		rate:     newRequestLimiter(requestRatePerSecond, maxInFlightRequests),
+	}, nil
 }
 
 // Handler builds the public HTTP router. No Hydra or Kratos admin endpoint is
@@ -52,12 +70,15 @@ func (s *Server) Handler() http.Handler {
 	router.Use(s.securityHeaders)
 	router.Use(s.requestID)
 	router.Use(s.accessLog)
+	router.Use(s.requestAdmission)
+	router.Use(s.requestTimeout)
 
 	router.Get("/login", s.handleLogin)
 	router.Get("/login/callback", s.handleLoginCallback)
 	router.Get("/consent", s.handleConsent)
 	router.Post("/consent", s.handleConsentSubmit)
 	router.Get("/logout", s.handleLogout)
+	router.Post("/logout", s.handleLogoutSubmit)
 	router.Get("/healthz", s.handleHealth)
 	router.Get("/readyz", s.handleReady)
 
@@ -70,11 +91,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	result, err := s.service.StartLogin(r.Context(), challenge)
+	result, err := s.service.StartLogin(r.Context(), challenge, ports.LoginStartInput{
+		BrowserState: browserStateCookie(r, loginBrowserStateCookie),
+	})
 	if err != nil {
 		s.writeError(w, r, err)
 		return
 	}
+	s.setBrowserStateCookie(w, loginBrowserStateCookie, result.BrowserState)
 	s.redirect(w, r, result.URL)
 }
 
@@ -95,10 +119,11 @@ func (s *Server) handleLoginCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.service.CompleteLogin(r.Context(), transaction, ports.LoginInput{
-		CSRFToken:   csrfToken,
-		Credentials: s.sessionCredentials(r),
-		Remember:    remember,
-		RememberFor: rememberFor,
+		CSRFToken:    csrfToken,
+		BrowserState: browserStateCookie(r, loginBrowserStateCookie),
+		Credentials:  s.sessionCredentials(r),
+		Remember:     remember,
+		RememberFor:  rememberFor,
 	})
 	if err != nil {
 		s.writeError(w, r, err)
@@ -113,11 +138,14 @@ func (s *Server) handleConsent(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	result, err := s.service.StartConsent(r.Context(), challenge)
+	result, err := s.service.StartConsent(r.Context(), challenge, ports.ConsentStartInput{
+		BrowserState: browserStateCookie(r, consentBrowserStateCookie),
+	})
 	if err != nil {
 		s.writeError(w, r, err)
 		return
 	}
+	s.setBrowserStateCookie(w, consentBrowserStateCookie, result.BrowserState)
 	s.redirect(w, r, result.URL)
 }
 
@@ -128,7 +156,7 @@ func (s *Server) handleConsentSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
 	if err := r.ParseForm(); err != nil {
-		s.writeError(w, r, fmt.Errorf("parse consent form: %w", err))
+		s.writeError(w, r, fmt.Errorf("parse consent form: %w", domain.ErrInvalidForm))
 		return
 	}
 	transaction := strings.TrimSpace(r.Form.Get("transaction"))
@@ -141,13 +169,14 @@ func (s *Server) handleConsentSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.service.CompleteConsent(r.Context(), ports.ConsentInput{
-		Transaction: transaction,
-		CSRFToken:   csrfToken,
-		Decision:    decision,
-		GrantScopes: grantScopes,
-		Credentials: s.sessionCredentials(r),
-		Remember:    remember,
-		RememberFor: rememberFor,
+		Transaction:  transaction,
+		CSRFToken:    csrfToken,
+		BrowserState: browserStateCookie(r, consentBrowserStateCookie),
+		Decision:     decision,
+		GrantScopes:  grantScopes,
+		Credentials:  s.sessionCredentials(r),
+		Remember:     remember,
+		RememberFor:  rememberFor,
 	})
 	if err != nil {
 		s.writeError(w, r, err)
@@ -162,7 +191,32 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, err)
 		return
 	}
-	result, err := s.service.Logout(r.Context(), challenge)
+	result, err := s.service.StartLogout(r.Context(), challenge, ports.LogoutStartInput{
+		BrowserState: browserStateCookie(r, logoutBrowserStateCookie),
+	})
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	s.setBrowserStateCookie(w, logoutBrowserStateCookie, result.BrowserState)
+	s.redirect(w, r, result.URL)
+}
+
+func (s *Server) handleLogoutSubmit(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.OriginAllowed(r.Header.Get("Origin")) {
+		s.writeError(w, r, domain.ErrInvalidOrigin)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+	if err := r.ParseForm(); err != nil {
+		s.writeError(w, r, fmt.Errorf("parse logout form: %w", domain.ErrInvalidForm))
+		return
+	}
+	result, err := s.service.CompleteLogout(r.Context(), ports.LogoutInput{
+		Transaction:  strings.TrimSpace(r.Form.Get("transaction")),
+		CSRFToken:    strings.TrimSpace(r.Form.Get("csrf")),
+		BrowserState: browserStateCookie(r, logoutBrowserStateCookie),
+	})
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -222,6 +276,9 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
+		if s.cfg.ProviderURL != nil && s.cfg.ProviderURL.Scheme == "https" {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -259,6 +316,56 @@ func (s *Server) accessLog(next http.Handler) http.Handler {
 			"status", recorder.status,
 			"duration_ms", time.Since(started).Milliseconds(),
 		)
+	})
+}
+
+func (s *Server) requestAdmission(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.rate.allow() {
+			s.writeError(w, r, domain.ErrRateLimited)
+			return
+		}
+		select {
+		case s.inFlight <- struct{}{}:
+			defer func() { <-s.inFlight }()
+			next.ServeHTTP(w, r)
+		default:
+			s.writeError(w, r, domain.ErrRateLimited)
+		}
+	})
+}
+
+type requestLimiter struct {
+	mu     sync.Mutex
+	rate   float64
+	burst  float64
+	tokens float64
+	last   time.Time
+}
+
+func newRequestLimiter(rate, burst int) *requestLimiter {
+	now := time.Now()
+	return &requestLimiter{rate: float64(rate), burst: float64(burst), tokens: float64(burst), last: now}
+}
+
+func (l *requestLimiter) allow() bool {
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.tokens = min(l.burst, l.tokens+now.Sub(l.last).Seconds()*l.rate)
+	l.last = now
+	if l.tokens < 1 {
+		return false
+	}
+	l.tokens--
+	return true
+}
+
+func (s *Server) requestTimeout(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), requestBudget)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -342,10 +449,38 @@ func rememberOptions(rememberValue, rememberForValue string) (bool, int64, error
 		return remember, 0, nil
 	}
 	rememberFor, err := strconv.ParseInt(rememberForValue, 10, 64)
-	if err != nil || rememberFor < 0 {
+	if err != nil || rememberFor < 0 || rememberFor > int64((24*time.Hour)/time.Second) || (!remember && rememberFor != 0) {
 		return false, 0, domain.ErrInvalidRemember
 	}
 	return remember, rememberFor, nil
+}
+
+func browserStateCookie(r *http.Request, name string) string {
+	cookie, err := r.Cookie(name)
+	if err != nil || len(cookie.Value) > 128 {
+		return ""
+	}
+	return cookie.Value
+}
+
+func (s *Server) setBrowserStateCookie(w http.ResponseWriter, name, value string) {
+	if value == "" {
+		return
+	}
+	sameSite := http.SameSiteLaxMode
+	secure := s.cfg.ProviderURL != nil && s.cfg.ProviderURL.Scheme == "https"
+	if secure {
+		sameSite = http.SameSiteNoneMode
+	}
+	//nolint:gosec // development permits HTTP; non-development Config requires HTTPS.
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: sameSite,
+	})
 }
 
 func newRequestID() (string, error) {
@@ -358,8 +493,12 @@ func newRequestID() (string, error) {
 
 func statusForError(err error) int {
 	switch {
+	case errors.Is(err, domain.ErrInvalidForm):
+		return http.StatusBadRequest
 	case errors.Is(err, domain.ErrInvalidOrigin), errors.Is(err, domain.ErrPolicyDenied):
 		return http.StatusForbidden
+	case errors.Is(err, domain.ErrRateLimited):
+		return http.StatusTooManyRequests
 	case errors.Is(err, domain.ErrUnauthenticated), errors.Is(err, domain.ErrInsufficientAssurance):
 		return http.StatusUnauthorized
 	case errors.Is(err, domain.ErrUpstream):
@@ -368,11 +507,14 @@ func statusForError(err error) int {
 		errors.Is(err, domain.ErrInvalidClient),
 		errors.Is(err, domain.ErrInvalidRedirect),
 		errors.Is(err, domain.ErrInvalidScope),
+		errors.Is(err, domain.ErrInvalidAudience),
+		errors.Is(err, domain.ErrInvalidAssurance),
 		errors.Is(err, domain.ErrInvalidTransaction),
 		errors.Is(err, domain.ErrExpiredTransaction),
 		errors.Is(err, domain.ErrReplay),
 		errors.Is(err, domain.ErrInvalidDecision),
 		errors.Is(err, domain.ErrInvalidCSRF),
+		errors.Is(err, domain.ErrInvalidBrowserState),
 		errors.Is(err, domain.ErrInvalidRemember):
 		return http.StatusBadRequest
 	default:
@@ -390,6 +532,8 @@ func publicError(status int) string {
 		return "login_required"
 	case http.StatusBadGateway:
 		return "temporarily_unavailable"
+	case http.StatusTooManyRequests:
+		return "rate_limited"
 	default:
 		return "server_error"
 	}

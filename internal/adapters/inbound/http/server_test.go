@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -65,6 +66,22 @@ func TestRememberOptionsAcceptsHTMLCheckboxValues(t *testing.T) {
 	}
 }
 
+func TestRememberOptionsRejectsUnboundedOrInconsistentValues(t *testing.T) {
+	t.Parallel()
+
+	for name, values := range map[string][2]string{
+		"duration without remember": {"false", "60"},
+		"duration above maximum":    {"true", "86401"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if _, _, err := rememberOptions(values[0], values[1]); !errors.Is(err, domain.ErrInvalidRemember) {
+				t.Fatalf("rememberOptions error = %v, want invalid remember", err)
+			}
+		})
+	}
+}
+
 func TestServer_LoginCallbackUsesKratosCookie(t *testing.T) {
 	t.Parallel()
 
@@ -85,6 +102,7 @@ func TestServer_LoginCallbackUsesKratosCookie(t *testing.T) {
 	}
 	transaction := parsed.Query().Get("transaction")
 	csrfToken := parsed.Query().Get("csrf")
+	providerState := startRecorder.Result().Cookies()[0]
 
 	callbackRequest := httptest.NewRequestWithContext(
 		context.Background(),
@@ -99,6 +117,7 @@ func TestServer_LoginCallbackUsesKratosCookie(t *testing.T) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
+	callbackRequest.AddCookie(providerState)
 	callbackRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(callbackRecorder, callbackRequest)
 
@@ -110,6 +129,45 @@ func TestServer_LoginCallbackUsesKratosCookie(t *testing.T) {
 	}
 	if kratos.credentials.CookieValue != "opaque-session" {
 		t.Fatalf("Kratos cookie = %q, want opaque-session", kratos.credentials.CookieValue)
+	}
+}
+
+func TestServer_LoginCallbackRequiresBrowserStateCookie(t *testing.T) {
+	t.Parallel()
+
+	handler, hydra, kratos, policy := newTestHandler(t)
+	hydra.login = domain.LoginRequest{Challenge: "login-challenge", Client: testClient()}
+	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2"}
+	policy.loginAllowed = true
+
+	startRequest := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/login?login_challenge=login-challenge", nil)
+	startRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(startRecorder, startRequest)
+	parsed, err := url.Parse(startRecorder.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse start location: %v", err)
+	}
+	callbackRequest := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"/login/callback?transaction="+url.QueryEscape(parsed.Query().Get("transaction"))+"&csrf="+url.QueryEscape(parsed.Query().Get("csrf")),
+		nil,
+	)
+	callbackRequest.AddCookie(&http.Cookie{
+		Name:     "ory_kratos_session",
+		Value:    "opaque-session",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	callbackRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRecorder, callbackRequest)
+
+	if callbackRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("callback status = %d, want %d", callbackRecorder.Code, http.StatusBadRequest)
+	}
+	if hydra.loginAcceptance.Subject != "" {
+		t.Fatal("login was accepted without the browser-state cookie")
 	}
 }
 
@@ -193,6 +251,7 @@ func newTestHandler(t *testing.T) (http.Handler, *fakeHydra, *fakeKratos, *fakeP
 
 type fakeHydra struct {
 	login           domain.LoginRequest
+	loginAcceptance ports.LoginAcceptance
 	loginRedirect   string
 	consentRedirect string
 	logoutRedirect  string
@@ -202,7 +261,8 @@ func (f *fakeHydra) GetLoginRequest(context.Context, string) (domain.LoginReques
 	return f.login, nil
 }
 
-func (f *fakeHydra) AcceptLogin(context.Context, string, ports.LoginAcceptance) (string, error) {
+func (f *fakeHydra) AcceptLogin(_ context.Context, _ string, acceptance ports.LoginAcceptance) (string, error) {
+	f.loginAcceptance = acceptance
 	return f.loginRedirect, nil
 }
 
@@ -252,7 +312,7 @@ func (f *fakePolicy) AuthorizeLogin(context.Context, string, string) (bool, erro
 	return f.loginAllowed, nil
 }
 
-func (f *fakePolicy) AuthorizeConsent(context.Context, string, string, []string) (ports.ConsentDecision, error) {
+func (f *fakePolicy) AuthorizeConsent(context.Context, string, string, []string, []string) (ports.ConsentDecision, error) {
 	return ports.ConsentDecision{}, nil
 }
 

@@ -37,7 +37,11 @@ func New(baseURL *url.URL, httpClient *http.Client, token string) (*Client, erro
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
-	return &Client{baseURL: baseURL, httpClient: httpClient, token: token}, nil
+	client := *httpClient
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &Client{baseURL: baseURL, httpClient: &client, token: token}, nil
 }
 
 // GetLoginRequest retrieves a Hydra login challenge.

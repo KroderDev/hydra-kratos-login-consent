@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/config"
@@ -39,6 +40,7 @@ type Service struct {
 	policy    ports.Policy
 	readiness []ports.Readiness
 	now       func() time.Time
+	admission *transactionAdmission
 }
 
 var _ ports.Provider = (*Service)(nil)
@@ -51,6 +53,9 @@ type ConsentInput = ports.ConsentInput
 
 // LoginInput is the application service's login completion input.
 type LoginInput = ports.LoginInput
+
+// LogoutInput is the application service's logout completion input.
+type LogoutInput = ports.LogoutInput
 
 // NewService validates configuration and wires the application ports.
 func NewService(cfg config.Config, dependencies Dependencies) (*Service, error) {
@@ -73,11 +78,12 @@ func NewService(cfg config.Config, dependencies Dependencies) (*Service, error) 
 		policy:    dependencies.Policy,
 		readiness: dependencies.Readiness,
 		now:       dependencies.Now,
+		admission: newTransactionAdmission(cfg.EffectiveMaxPendingTransactions(), dependencies.Now),
 	}, nil
 }
 
 // StartLogin validates a Hydra login challenge and starts or completes login.
-func (s *Service) StartLogin(ctx context.Context, challenge string) (RedirectResult, error) {
+func (s *Service) StartLogin(ctx context.Context, challenge string, input ports.LoginStartInput) (RedirectResult, error) {
 	if err := validateChallenge(challenge); err != nil {
 		return RedirectResult{}, err
 	}
@@ -85,7 +91,7 @@ func (s *Service) StartLogin(ctx context.Context, challenge string) (RedirectRes
 	if err != nil {
 		return RedirectResult{}, err
 	}
-	if request.Challenge != "" && request.Challenge != challenge {
+	if request.Challenge != challenge {
 		return RedirectResult{}, domain.ErrInvalidChallenge
 	}
 	client, err := s.validateClient(request.Client)
@@ -96,6 +102,9 @@ func (s *Service) StartLogin(ctx context.Context, challenge string) (RedirectRes
 		return RedirectResult{}, domain.ErrUnauthenticated
 	}
 
+	if request.RequestedAAL != "" && !domain.SupportedAAL(request.RequestedAAL) {
+		return RedirectResult{}, domain.ErrInvalidAssurance
+	}
 	requiredAAL := domain.HigherAAL(s.cfg.RequiredAAL, request.RequestedAAL)
 	if request.Skip && requiredAAL == "" {
 		allowed, err := s.policy.AuthorizeLogin(ctx, request.Subject, client.ID)
@@ -110,35 +119,40 @@ func (s *Service) StartLogin(ctx context.Context, challenge string) (RedirectRes
 	}
 
 	transaction := domain.Transaction{
-		Flow:        domain.FlowLogin,
-		Challenge:   challenge,
-		ClientID:    client.ID,
-		Subject:     request.Subject,
-		RequiredAAL: requiredAAL,
-		ExpiresAt:   s.now().Add(s.cfg.TransactionTTL),
+		Flow:         domain.FlowLogin,
+		Challenge:    challenge,
+		ClientID:     client.ID,
+		Subject:      request.Subject,
+		RequestedAAL: request.RequestedAAL,
+		RequiredAAL:  requiredAAL,
+		ExpiresAt:    s.now().Add(s.cfg.TransactionTTL),
+	}
+	transaction.BrowserState, err = s.startBrowserState(input.BrowserState)
+	if err != nil {
+		return RedirectResult{}, err
 	}
 	transaction.CSRFToken, err = newOpaqueToken()
 	if err != nil {
 		return RedirectResult{}, err
 	}
-	handle, err := s.state.Create(ctx, transaction)
+	handle, err := s.createTransaction(ctx, transaction)
 	if err != nil {
 		return RedirectResult{}, err
 	}
 	redirect, err := s.cfg.ExternalRedirect(domain.FlowLogin, handle, transaction.CSRFToken)
-	return RedirectResult{URL: redirect}, err
+	return RedirectResult{URL: redirect, BrowserState: transaction.BrowserState}, err
 }
 
 // CompleteLogin consumes a login transaction and validates the Kratos session.
 func (s *Service) CompleteLogin(ctx context.Context, handle string, input ports.LoginInput) (RedirectResult, error) {
-	transaction, err := s.consume(ctx, handle, domain.FlowLogin)
+	transaction, err := s.load(ctx, handle, domain.FlowLogin, input.CSRFToken, input.BrowserState)
 	if err != nil {
 		return RedirectResult{}, err
 	}
-	if err := validateCSRF(input.CSRFToken, transaction.CSRFToken); err != nil {
+	if err := validateRemember(input.Remember, input.RememberFor); err != nil {
 		return RedirectResult{}, err
 	}
-	if err := validateRemember(input.RememberFor); err != nil {
+	if _, err := s.consume(ctx, handle); err != nil {
 		return RedirectResult{}, err
 	}
 	session, err := s.kratos.ValidateSession(ctx, input.Credentials)
@@ -148,7 +162,7 @@ func (s *Service) CompleteLogin(ctx context.Context, handle string, input ports.
 	if transaction.Subject != "" && session.Subject != transaction.Subject {
 		return s.rejectLoginFailure(ctx, transaction.Challenge, domain.ErrUnauthenticated, domain.ErrUnauthenticated)
 	}
-	if !domain.AALAtLeast(session.AAL, transaction.RequiredAAL) {
+	if !domain.AALAtLeast(session.AAL, domain.HigherAAL(s.cfg.RequiredAAL, transaction.RequestedAAL)) {
 		return s.rejectLoginFailure(ctx, transaction.Challenge, domain.ErrInsufficientAssurance, domain.ErrInsufficientAssurance)
 	}
 	allowed, err := s.policy.AuthorizeLogin(ctx, session.Subject, transaction.ClientID)
@@ -169,7 +183,7 @@ func (s *Service) CompleteLogin(ctx context.Context, handle string, input ports.
 }
 
 // StartConsent validates a Hydra consent challenge and starts or completes consent.
-func (s *Service) StartConsent(ctx context.Context, challenge string) (RedirectResult, error) {
+func (s *Service) StartConsent(ctx context.Context, challenge string, input ports.ConsentStartInput) (RedirectResult, error) {
 	if err := validateChallenge(challenge); err != nil {
 		return RedirectResult{}, err
 	}
@@ -177,7 +191,7 @@ func (s *Service) StartConsent(ctx context.Context, challenge string) (RedirectR
 	if err != nil {
 		return RedirectResult{}, err
 	}
-	if request.Challenge != "" && request.Challenge != challenge {
+	if request.Challenge != challenge {
 		return RedirectResult{}, domain.ErrInvalidChallenge
 	}
 	client, err := s.validateClient(request.Client)
@@ -190,10 +204,9 @@ func (s *Service) StartConsent(ctx context.Context, challenge string) (RedirectR
 	if err := validateScopes(client, request.RequestedScopes); err != nil {
 		return RedirectResult{}, err
 	}
-	if request.Skip || client.SkipConsent {
-		return s.acceptConsentDecision(ctx, request, client, request.RequestedScopes, false, 0)
+	if err := validateAudiences(client, request.RequestedAudience); err != nil {
+		return RedirectResult{}, err
 	}
-
 	transaction := domain.Transaction{
 		Flow:              domain.FlowConsent,
 		Challenge:         challenge,
@@ -201,36 +214,44 @@ func (s *Service) StartConsent(ctx context.Context, challenge string) (RedirectR
 		Subject:           request.Subject,
 		RequestedScopes:   append([]string(nil), request.RequestedScopes...),
 		RequestedAudience: append([]string(nil), request.RequestedAudience...),
+		RequiredAAL:       s.cfg.RequiredAAL,
 		ExpiresAt:         s.now().Add(s.cfg.TransactionTTL),
+	}
+	transaction.BrowserState, err = s.startBrowserState(input.BrowserState)
+	if err != nil {
+		return RedirectResult{}, err
 	}
 	transaction.CSRFToken, err = newOpaqueToken()
 	if err != nil {
 		return RedirectResult{}, err
 	}
-	handle, err := s.state.Create(ctx, transaction)
+	handle, err := s.createTransaction(ctx, transaction)
 	if err != nil {
 		return RedirectResult{}, err
 	}
 	redirect, err := s.cfg.ExternalConsentRedirect(handle, transaction.CSRFToken, request.Client.Name, request.RequestedScopes)
-	return RedirectResult{URL: redirect}, err
+	if err == nil && (request.Skip || client.SkipConsent) {
+		redirect, err = addQueryValue(redirect, "skip_consent", "true")
+	}
+	return RedirectResult{URL: redirect, BrowserState: transaction.BrowserState}, err
 }
 
 // CompleteConsent consumes a consent transaction and submits a policy-checked result.
 func (s *Service) CompleteConsent(ctx context.Context, input ConsentInput) (RedirectResult, error) {
-	transaction, err := s.consume(ctx, input.Transaction, domain.FlowConsent)
+	transaction, err := s.load(ctx, input.Transaction, domain.FlowConsent, input.CSRFToken, input.BrowserState)
 	if err != nil {
 		return RedirectResult{}, err
 	}
 	if input.Decision != "accept" && input.Decision != "deny" {
 		return RedirectResult{}, domain.ErrInvalidDecision
 	}
-	if err := validateCSRF(input.CSRFToken, transaction.CSRFToken); err != nil {
-		return RedirectResult{}, err
-	}
-	if err := validateRemember(input.RememberFor); err != nil {
+	if err := validateRemember(input.Remember, input.RememberFor); err != nil {
 		return RedirectResult{}, err
 	}
 	if input.Decision == "deny" {
+		if _, err := s.consume(ctx, input.Transaction); err != nil {
+			return RedirectResult{}, err
+		}
 		return s.rejectConsent(ctx, transaction.Challenge, "access_denied", "The user denied access.")
 	}
 	if err := validateRequestedSubset(transaction.RequestedScopes, input.GrantScopes); err != nil {
@@ -243,9 +264,21 @@ func (s *Service) CompleteConsent(ctx context.Context, input ConsentInput) (Redi
 	if session.Subject != transaction.Subject {
 		return s.rejectConsentFailure(ctx, transaction.Challenge, domain.ErrUnauthenticated, domain.ErrUnauthenticated)
 	}
+	if !domain.AALAtLeast(session.AAL, domain.HigherAAL(s.cfg.RequiredAAL, transaction.RequiredAAL)) {
+		return s.rejectConsentFailure(ctx, transaction.Challenge, domain.ErrInsufficientAssurance, domain.ErrInsufficientAssurance)
+	}
 	client, ok := s.cfg.Client(transaction.ClientID)
 	if !ok {
 		return s.rejectConsentFailure(ctx, transaction.Challenge, domain.ErrInvalidClient, domain.ErrInvalidClient)
+	}
+	if err := validateScopes(client, transaction.RequestedScopes); err != nil {
+		return s.rejectConsentFailure(ctx, transaction.Challenge, domain.ErrInvalidScope, err)
+	}
+	if err := validateAudiences(client, transaction.RequestedAudience); err != nil {
+		return s.rejectConsentFailure(ctx, transaction.Challenge, domain.ErrInvalidAudience, err)
+	}
+	if _, err := s.consume(ctx, input.Transaction); err != nil {
+		return RedirectResult{}, err
 	}
 	return s.acceptConsentDecision(ctx, domain.ConsentRequest{
 		Challenge:         transaction.Challenge,
@@ -255,8 +288,9 @@ func (s *Service) CompleteConsent(ctx context.Context, input ConsentInput) (Redi
 	}, client, input.GrantScopes, input.Remember, input.RememberFor)
 }
 
-// Logout validates a Hydra logout challenge and its post-logout redirect.
-func (s *Service) Logout(ctx context.Context, challenge string) (RedirectResult, error) {
+// StartLogout validates a Hydra logout challenge and starts a browser-bound
+// logout handoff.
+func (s *Service) StartLogout(ctx context.Context, challenge string, input ports.LogoutStartInput) (RedirectResult, error) {
 	if err := validateChallenge(challenge); err != nil {
 		return RedirectResult{}, err
 	}
@@ -264,7 +298,7 @@ func (s *Service) Logout(ctx context.Context, challenge string) (RedirectResult,
 	if err != nil {
 		return RedirectResult{}, err
 	}
-	if request.Challenge != "" && request.Challenge != challenge {
+	if request.Challenge != challenge {
 		return RedirectResult{}, domain.ErrInvalidChallenge
 	}
 	client, err := s.validateClient(request.Client)
@@ -274,7 +308,39 @@ func (s *Service) Logout(ctx context.Context, challenge string) (RedirectResult,
 	if request.PostLogoutRedirectURI != "" && !contains(client.AllowedPostLogoutRedirects, request.PostLogoutRedirectURI) {
 		return RedirectResult{}, domain.ErrInvalidRedirect
 	}
-	redirect, err := s.logout.AcceptLogout(ctx, challenge)
+	transaction := domain.Transaction{
+		Flow:         domain.FlowLogout,
+		Challenge:    challenge,
+		ClientID:     client.ID,
+		BrowserState: input.BrowserState,
+		ExpiresAt:    s.now().Add(s.cfg.TransactionTTL),
+	}
+	if transaction.BrowserState, err = s.startBrowserState(transaction.BrowserState); err != nil {
+		return RedirectResult{}, err
+	}
+	transaction.CSRFToken, err = newOpaqueToken()
+	if err != nil {
+		return RedirectResult{}, err
+	}
+	handle, err := s.createTransaction(ctx, transaction)
+	if err != nil {
+		return RedirectResult{}, err
+	}
+	redirect, err := s.cfg.ExternalRedirect(domain.FlowLogout, handle, transaction.CSRFToken)
+	return RedirectResult{URL: redirect, BrowserState: transaction.BrowserState}, err
+}
+
+// CompleteLogout consumes a validated logout handoff and accepts the Hydra
+// logout challenge.
+func (s *Service) CompleteLogout(ctx context.Context, input ports.LogoutInput) (RedirectResult, error) {
+	transaction, err := s.load(ctx, input.Transaction, domain.FlowLogout, input.CSRFToken, input.BrowserState)
+	if err != nil {
+		return RedirectResult{}, err
+	}
+	if _, err := s.consume(ctx, input.Transaction); err != nil {
+		return RedirectResult{}, err
+	}
+	redirect, err := s.logout.AcceptLogout(ctx, transaction.Challenge)
 	return s.hydraRedirect(redirect, err)
 }
 
@@ -288,21 +354,58 @@ func (s *Service) Ready(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) consume(ctx context.Context, handle string, expectedFlow domain.Flow) (domain.Transaction, error) {
+func (s *Service) createTransaction(ctx context.Context, transaction domain.Transaction) (string, error) {
+	if !s.admission.reserve(transaction.ExpiresAt) {
+		return "", domain.ErrUpstream
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			s.admission.cancel()
+		}
+	}()
+	handle, err := s.state.Create(ctx, transaction)
+	if err != nil {
+		return "", err
+	}
+	s.admission.commit(handle, transaction.ExpiresAt)
+	committed = true
+	return handle, nil
+}
+
+func (s *Service) load(ctx context.Context, handle string, expectedFlow domain.Flow, csrfToken, browserState string) (domain.Transaction, error) {
 	if handle == "" || len(handle) > 256 {
 		return domain.Transaction{}, domain.ErrInvalidTransaction
 	}
-	transaction, err := s.state.Consume(ctx, handle)
+	transaction, err := s.state.Get(ctx, handle)
 	if err != nil {
+		if errors.Is(err, domain.ErrExpiredTransaction) || errors.Is(err, domain.ErrReplay) {
+			s.admission.release(handle)
+		}
 		return domain.Transaction{}, err
 	}
-	if transaction.Flow != expectedFlow || transaction.Challenge == "" || transaction.ClientID == "" || transaction.CSRFToken == "" {
+	if transaction.Flow != expectedFlow || transaction.Challenge == "" || transaction.ClientID == "" || transaction.CSRFToken == "" || transaction.BrowserState == "" {
 		return domain.Transaction{}, domain.ErrInvalidTransaction
 	}
 	if !transaction.ExpiresAt.After(s.now()) {
+		s.admission.release(handle)
 		return domain.Transaction{}, domain.ErrExpiredTransaction
 	}
+	if err := validateCSRF(csrfToken, transaction.CSRFToken); err != nil {
+		return domain.Transaction{}, err
+	}
+	if err := validateBrowserState(browserState, transaction.BrowserState); err != nil {
+		return domain.Transaction{}, err
+	}
 	return transaction, nil
+}
+
+func (s *Service) consume(ctx context.Context, handle string) (domain.Transaction, error) {
+	transaction, err := s.state.Consume(ctx, handle)
+	if err == nil || errors.Is(err, domain.ErrReplay) || errors.Is(err, domain.ErrExpiredTransaction) {
+		s.admission.release(handle)
+	}
+	return transaction, err
 }
 
 func (s *Service) validateClient(client domain.Client) (config.Client, error) {
@@ -325,13 +428,19 @@ func (s *Service) validateClient(client domain.Client) (config.Client, error) {
 }
 
 func (s *Service) acceptConsentDecision(ctx context.Context, request domain.ConsentRequest, client config.Client, scopes []string, remember bool, rememberFor int64) (RedirectResult, error) {
-	if err := validateRemember(rememberFor); err != nil {
+	if err := validateRemember(remember, rememberFor); err != nil {
 		return RedirectResult{}, err
+	}
+	if err := validateScopes(client, request.RequestedScopes); err != nil {
+		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrInvalidScope, err)
+	}
+	if err := validateAudiences(client, request.RequestedAudience); err != nil {
+		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrInvalidAudience, err)
 	}
 	if err := validateRequestedSubset(request.RequestedScopes, scopes); err != nil {
 		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrInvalidScope, err)
 	}
-	decision, err := s.policy.AuthorizeConsent(ctx, request.Subject, client.ID, scopes)
+	decision, err := s.policy.AuthorizeConsent(ctx, request.Subject, client.ID, scopes, request.RequestedAudience)
 	if err != nil {
 		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrPolicyDenied, err)
 	}
@@ -408,6 +517,17 @@ func (s *Service) hydraRedirect(target string, upstreamErr error) (RedirectResul
 	return RedirectResult{URL: target}, nil
 }
 
+func addQueryValue(target, name, value string) (string, error) {
+	parsed, err := url.Parse(target)
+	if err != nil {
+		return "", domain.ErrInvalidRedirect
+	}
+	query := parsed.Query()
+	query.Set(name, value)
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
 func validateChallenge(value string) error {
 	if value == "" || len(value) > 512 || strings.ContainsAny(value, "\r\n") {
 		return domain.ErrInvalidChallenge
@@ -422,6 +542,18 @@ func validateScopes(client config.Client, scopes []string) error {
 	for _, scope := range scopes {
 		if scope == "" || !contains(client.AllowedScopes, scope) {
 			return domain.ErrInvalidScope
+		}
+	}
+	return nil
+}
+
+func validateAudiences(client config.Client, audiences []string) error {
+	if hasDuplicates(audiences) {
+		return domain.ErrInvalidAudience
+	}
+	for _, audience := range audiences {
+		if audience == "" || !contains(client.AllowedAudiences, audience) {
+			return domain.ErrInvalidAudience
 		}
 	}
 	return nil
@@ -493,6 +625,16 @@ func newOpaqueToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(value), nil
 }
 
+func (s *Service) startBrowserState(value string) (string, error) {
+	if value == "" {
+		return newOpaqueToken()
+	}
+	if err := validateOpaqueToken(value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
 func validateCSRF(actual, expected string) error {
 	if actual == "" || expected == "" || subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
 		return domain.ErrInvalidCSRF
@@ -500,9 +642,88 @@ func validateCSRF(actual, expected string) error {
 	return nil
 }
 
-func validateRemember(rememberFor int64) error {
-	if rememberFor < 0 {
+func validateBrowserState(actual, expected string) error {
+	if err := validateOpaqueToken(actual); err != nil {
+		return err
+	}
+	if err := validateOpaqueToken(expected); err != nil || subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
+		return domain.ErrInvalidBrowserState
+	}
+	return nil
+}
+
+func validateOpaqueToken(value string) error {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(decoded) != 32 {
+		return domain.ErrInvalidBrowserState
+	}
+	return nil
+}
+
+func validateRemember(remember bool, rememberFor int64) error {
+	if rememberFor < 0 || rememberFor > int64((24*time.Hour)/time.Second) || (!remember && rememberFor != 0) {
 		return domain.ErrInvalidRemember
 	}
 	return nil
+}
+
+type transactionAdmission struct {
+	mu       sync.Mutex
+	now      func() time.Time
+	max      int
+	reserved int
+	active   map[string]time.Time
+}
+
+func newTransactionAdmission(maxPending int, now func() time.Time) *transactionAdmission {
+	if maxPending <= 0 {
+		maxPending = config.DefaultMaxPendingTransactions
+	}
+	if now == nil {
+		now = time.Now
+	}
+	return &transactionAdmission{max: maxPending, now: now, active: make(map[string]time.Time)}
+}
+
+func (a *transactionAdmission) reserve(expiresAt time.Time) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.removeExpiredLocked()
+	if !expiresAt.After(a.now()) || len(a.active)+a.reserved >= a.max {
+		return false
+	}
+	a.reserved++
+	return true
+}
+
+func (a *transactionAdmission) commit(handle string, expiresAt time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.reserved > 0 {
+		a.reserved--
+	}
+	a.active[handle] = expiresAt
+}
+
+func (a *transactionAdmission) cancel() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.reserved > 0 {
+		a.reserved--
+	}
+}
+
+func (a *transactionAdmission) release(handle string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.active, handle)
+}
+
+func (a *transactionAdmission) removeExpiredLocked() {
+	now := a.now()
+	for handle, expiresAt := range a.active {
+		if !expiresAt.After(now) {
+			delete(a.active, handle)
+		}
+	}
 }

@@ -8,36 +8,62 @@ import (
 
 // Provider is the driving port for the provider flows.
 type Provider interface {
-	StartLogin(context.Context, string) (RedirectResult, error)
+	StartLogin(context.Context, string, LoginStartInput) (RedirectResult, error)
 	CompleteLogin(context.Context, string, LoginInput) (RedirectResult, error)
-	StartConsent(context.Context, string) (RedirectResult, error)
+	StartConsent(context.Context, string, ConsentStartInput) (RedirectResult, error)
 	CompleteConsent(context.Context, ConsentInput) (RedirectResult, error)
-	Logout(context.Context, string) (RedirectResult, error)
+	StartLogout(context.Context, string, LogoutStartInput) (RedirectResult, error)
+	CompleteLogout(context.Context, LogoutInput) (RedirectResult, error)
 	Ready(context.Context) error
 }
 
 // RedirectResult contains a validated browser redirect target.
 type RedirectResult struct {
-	URL string
+	URL          string
+	BrowserState string
+}
+
+// LoginStartInput contains browser proof used to bind a login transaction.
+type LoginStartInput struct {
+	BrowserState string
 }
 
 // ConsentInput contains the external UI's consent decision and browser proof.
 type ConsentInput struct {
-	Transaction string
-	CSRFToken   string
-	Decision    string
-	GrantScopes []string
-	Credentials SessionCredentials
-	Remember    bool
-	RememberFor int64
+	Transaction  string
+	CSRFToken    string
+	BrowserState string
+	Decision     string
+	GrantScopes  []string
+	Credentials  SessionCredentials
+	Remember     bool
+	RememberFor  int64
+}
+
+// ConsentStartInput contains browser proof used to bind a consent transaction.
+type ConsentStartInput struct {
+	BrowserState string
 }
 
 // LoginInput contains the external UI's login completion proof and options.
 type LoginInput struct {
-	CSRFToken   string
-	Credentials SessionCredentials
-	Remember    bool
-	RememberFor int64
+	CSRFToken    string
+	BrowserState string
+	Credentials  SessionCredentials
+	Remember     bool
+	RememberFor  int64
+}
+
+// LogoutStartInput contains browser proof used to bind a logout transaction.
+type LogoutStartInput struct {
+	BrowserState string
+}
+
+// LogoutInput contains the external UI's logout proof.
+type LogoutInput struct {
+	Transaction  string
+	CSRFToken    string
+	BrowserState string
 }
 
 // LoginProvider completes Hydra login challenges.
@@ -100,13 +126,15 @@ type SessionCredentials struct {
 // TransactionStore creates and atomically consumes short-lived transactions.
 type TransactionStore interface {
 	Create(context.Context, domain.Transaction) (string, error)
+	Get(context.Context, string) (domain.Transaction, error)
 	Consume(context.Context, string) (domain.Transaction, error)
 }
 
-// Policy evaluates application authorization without owning protocol state.
+// Policy evaluates application authorization for scopes and audiences without
+// owning protocol state.
 type Policy interface {
 	AuthorizeLogin(context.Context, string, string) (bool, error)
-	AuthorizeConsent(context.Context, string, string, []string) (ConsentDecision, error)
+	AuthorizeConsent(context.Context, string, string, []string, []string) (ConsentDecision, error)
 }
 
 // ConsentDecision is the policy result and candidate token claims.

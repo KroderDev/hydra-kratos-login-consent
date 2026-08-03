@@ -112,6 +112,27 @@ func TestConfigValidateRejectsUnsafeClientURLs(t *testing.T) {
 	}
 }
 
+func TestConfigValidateRequiresHTTPSOutsideDevelopment(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t)
+	cfg.Environment = "production"
+	cfg.ProviderURL, _ = url.Parse("http://provider.example")
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate accepted an HTTP provider URL in production")
+	}
+}
+
+func TestConfigValidateRejectsLongTransactionTTL(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t)
+	cfg.TransactionTTL = MaxTransactionTTL + time.Second
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate accepted a transaction TTL above the maximum")
+	}
+}
+
 func validConfig(t *testing.T) Config {
 	t.Helper()
 	parse := func(raw string) *url.URL {

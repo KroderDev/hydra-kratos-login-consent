@@ -25,7 +25,7 @@ func TestService_StartLoginAndCompleteLogin(t *testing.T) {
 	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2", AMR: []string{"oidc", "totp"}}
 	policy.loginAllowed = true
 
-	started, err := service.StartLogin(context.Background(), "login-challenge")
+	started, err := service.StartLogin(context.Background(), "login-challenge", ports.LoginStartInput{})
 	if err != nil {
 		t.Fatalf("start login: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestService_StartLoginAndCompleteLogin(t *testing.T) {
 		t.Fatal("login challenge leaked into external UI redirect")
 	}
 
-	completed, err := service.CompleteLogin(context.Background(), handle, loginInputFromRedirect(t, started.URL, ports.SessionCredentials{
+	completed, err := service.CompleteLogin(context.Background(), handle, loginInputFromRedirect(t, started.URL, started.BrowserState, ports.SessionCredentials{
 		CookieName:  "ory_kratos_session",
 		CookieValue: "opaque-session",
 	}))
@@ -63,14 +63,14 @@ func TestService_CompleteLoginRejectsInvalidAssurance(t *testing.T) {
 	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal1"}
 	policy.loginAllowed = true
 
-	started, err := service.StartLogin(context.Background(), "login-challenge")
+	started, err := service.StartLogin(context.Background(), "login-challenge", ports.LoginStartInput{})
 	if err != nil {
 		t.Fatalf("start login: %v", err)
 	}
 	completed, err := service.CompleteLogin(
 		context.Background(),
 		transactionFromRedirect(t, started.URL),
-		loginInputFromRedirect(t, started.URL, ports.SessionCredentials{CookieName: "ory_kratos_session", CookieValue: "opaque-session"}),
+		loginInputFromRedirect(t, started.URL, started.BrowserState, ports.SessionCredentials{CookieName: "ory_kratos_session", CookieValue: "opaque-session"}),
 	)
 	if err != nil {
 		t.Fatalf("complete login: %v", err)
@@ -89,20 +89,74 @@ func TestService_CompleteLoginRejectsInvalidAssurance(t *testing.T) {
 func TestService_CompleteLoginRejectsInvalidCSRF(t *testing.T) {
 	t.Parallel()
 
-	service, hydra, _, _, _ := newTestService(t)
+	service, hydra, kratos, policy, _ := newTestService(t)
 	hydra.login = domain.LoginRequest{Challenge: "login-challenge", Client: testClient()}
+	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2"}
+	policy.loginAllowed = true
 
-	started, err := service.StartLogin(context.Background(), "login-challenge")
+	started, err := service.StartLogin(context.Background(), "login-challenge", ports.LoginStartInput{})
 	if err != nil {
 		t.Fatalf("start login: %v", err)
 	}
-	input := loginInputFromRedirect(t, started.URL, ports.SessionCredentials{})
+	input := loginInputFromRedirect(t, started.URL, started.BrowserState, ports.SessionCredentials{})
 	input.CSRFToken = "wrong-csrf-token"
 	if _, err := service.CompleteLogin(context.Background(), transactionFromRedirect(t, started.URL), input); !errors.Is(err, domain.ErrInvalidCSRF) {
 		t.Fatalf("completion error = %v, want invalid csrf", err)
 	}
 	if hydra.loginAcceptance.Subject != "" {
 		t.Fatal("login was accepted with an invalid csrf token")
+	}
+	input.CSRFToken = queryValue(t, started.URL, "csrf")
+	if _, err := service.CompleteLogin(context.Background(), transactionFromRedirect(t, started.URL), input); err != nil {
+		t.Fatalf("valid completion after invalid csrf: %v", err)
+	}
+}
+
+func TestService_CompleteLoginRejectsUnboundBrowserState(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, _, _, _ := newTestService(t)
+	hydra.login = domain.LoginRequest{Challenge: "login-challenge", Client: testClient()}
+	started, err := service.StartLogin(context.Background(), "login-challenge", ports.LoginStartInput{})
+	if err != nil {
+		t.Fatalf("start login: %v", err)
+	}
+	input := loginInputFromRedirect(t, started.URL, "different-browser-state", ports.SessionCredentials{})
+	if _, err := service.CompleteLogin(context.Background(), transactionFromRedirect(t, started.URL), input); !errors.Is(err, domain.ErrInvalidBrowserState) {
+		t.Fatalf("completion error = %v, want invalid browser state", err)
+	}
+}
+
+func TestService_CompleteConsentInvalidCSRFDoesNotConsume(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, kratos, policy, _ := newTestService(t)
+	hydra.consent = domain.ConsentRequest{
+		Challenge:       "consent-challenge",
+		Client:          testClient(),
+		Subject:         "operator-1",
+		RequestedScopes: []string{"openid"},
+	}
+	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2"}
+	policy.consentDecision = ports.ConsentDecision{Allowed: true}
+	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
+	if err != nil {
+		t.Fatalf("start consent: %v", err)
+	}
+	input := ConsentInput{
+		Transaction:  transactionFromRedirect(t, started.URL),
+		CSRFToken:    "wrong-csrf",
+		BrowserState: started.BrowserState,
+		Decision:     "accept",
+		GrantScopes:  []string{"openid"},
+		Credentials:  ports.SessionCredentials{CookieName: "ory_kratos_session", CookieValue: "opaque-session"},
+	}
+	if _, err := service.CompleteConsent(context.Background(), input); !errors.Is(err, domain.ErrInvalidCSRF) {
+		t.Fatalf("invalid csrf error = %v, want invalid csrf", err)
+	}
+	input.CSRFToken = queryValue(t, started.URL, "csrf")
+	if _, err := service.CompleteConsent(context.Background(), input); err != nil {
+		t.Fatalf("valid consent after invalid csrf: %v", err)
 	}
 }
 
@@ -114,13 +168,13 @@ func TestService_TransactionIsSingleUse(t *testing.T) {
 	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2"}
 	policy.loginAllowed = true
 
-	started, err := service.StartLogin(context.Background(), "login-challenge")
+	started, err := service.StartLogin(context.Background(), "login-challenge", ports.LoginStartInput{})
 	if err != nil {
 		t.Fatalf("start login: %v", err)
 	}
 	handle := transactionFromRedirect(t, started.URL)
 	credentials := ports.SessionCredentials{CookieName: "ory_kratos_session", CookieValue: "opaque-session"}
-	input := loginInputFromRedirect(t, started.URL, credentials)
+	input := loginInputFromRedirect(t, started.URL, started.BrowserState, credentials)
 	if _, err := service.CompleteLogin(context.Background(), handle, input); err != nil {
 		t.Fatalf("first completion: %v", err)
 	}
@@ -134,7 +188,7 @@ func TestService_ExpiredTransactionIsRejected(t *testing.T) {
 
 	service, hydra, _, _, now := newTestService(t)
 	hydra.login = domain.LoginRequest{Challenge: "login-challenge", Client: testClient()}
-	started, err := service.StartLogin(context.Background(), "login-challenge")
+	started, err := service.StartLogin(context.Background(), "login-challenge", ports.LoginStartInput{})
 	if err != nil {
 		t.Fatalf("start login: %v", err)
 	}
@@ -156,7 +210,7 @@ func TestService_StartLoginRejectsUnknownClient(t *testing.T) {
 		},
 	}
 
-	if _, err := service.StartLogin(context.Background(), "login-challenge"); !errors.Is(err, domain.ErrInvalidClient) {
+	if _, err := service.StartLogin(context.Background(), "login-challenge", ports.LoginStartInput{}); !errors.Is(err, domain.ErrInvalidClient) {
 		t.Fatalf("start login error = %v, want invalid client", err)
 	}
 }
@@ -182,17 +236,18 @@ func TestService_ConsentReducesScopesAndFiltersClaims(t *testing.T) {
 		},
 	}
 
-	started, err := service.StartConsent(context.Background(), "consent-challenge")
+	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
 	if err != nil {
 		t.Fatalf("start consent: %v", err)
 	}
 	handle := transactionFromRedirect(t, started.URL)
 	completed, err := service.CompleteConsent(context.Background(), ConsentInput{
-		Transaction: handle,
-		CSRFToken:   queryValue(t, started.URL, "csrf"),
-		Decision:    "accept",
-		GrantScopes: []string{"openid"},
-		Credentials: ports.SessionCredentials{CookieName: "ory_kratos_session", CookieValue: "opaque-session"},
+		Transaction:  handle,
+		CSRFToken:    queryValue(t, started.URL, "csrf"),
+		BrowserState: started.BrowserState,
+		Decision:     "accept",
+		GrantScopes:  []string{"openid"},
+		Credentials:  ports.SessionCredentials{CookieName: "ory_kratos_session", CookieValue: "opaque-session"},
 	})
 	if err != nil {
 		t.Fatalf("complete consent: %v", err)
@@ -222,15 +277,16 @@ func TestService_ConsentRejectsUnrequestedScope(t *testing.T) {
 		RequestedScopes: []string{"openid"},
 	}
 
-	started, err := service.StartConsent(context.Background(), "consent-challenge")
+	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
 	if err != nil {
 		t.Fatalf("start consent: %v", err)
 	}
 	result, err := service.CompleteConsent(context.Background(), ConsentInput{
-		Transaction: transactionFromRedirect(t, started.URL),
-		CSRFToken:   queryValue(t, started.URL, "csrf"),
-		Decision:    "accept",
-		GrantScopes: []string{"admin"},
+		Transaction:  transactionFromRedirect(t, started.URL),
+		CSRFToken:    queryValue(t, started.URL, "csrf"),
+		BrowserState: started.BrowserState,
+		Decision:     "accept",
+		GrantScopes:  []string{"admin"},
 	})
 	if err != nil {
 		t.Fatalf("complete consent: %v", err)
@@ -253,7 +309,7 @@ func TestService_LogoutRejectsUnallowlistedReturnURL(t *testing.T) {
 		PostLogoutRedirectURI: "https://evil.example/callback",
 	}
 
-	if _, err := service.Logout(context.Background(), "logout-challenge"); !errors.Is(err, domain.ErrInvalidRedirect) {
+	if _, err := service.StartLogout(context.Background(), "logout-challenge", ports.LogoutStartInput{}); !errors.Is(err, domain.ErrInvalidRedirect) {
 		t.Fatalf("logout error = %v, want invalid redirect", err)
 	}
 	if hydra.logoutAccepted {
@@ -343,9 +399,9 @@ func queryValue(t *testing.T, redirect, name string) string {
 	return parsed.Query().Get(name)
 }
 
-func loginInputFromRedirect(t *testing.T, redirect string, credentials ports.SessionCredentials) ports.LoginInput {
+func loginInputFromRedirect(t *testing.T, redirect, browserState string, credentials ports.SessionCredentials) ports.LoginInput {
 	t.Helper()
-	return ports.LoginInput{CSRFToken: queryValue(t, redirect, "csrf"), Credentials: credentials}
+	return ports.LoginInput{CSRFToken: queryValue(t, redirect, "csrf"), BrowserState: browserState, Credentials: credentials}
 }
 
 func containsString(value, expected string) bool {
@@ -430,6 +486,6 @@ func (f *fakePolicy) AuthorizeLogin(context.Context, string, string) (bool, erro
 	return f.loginAllowed, f.loginErr
 }
 
-func (f *fakePolicy) AuthorizeConsent(context.Context, string, string, []string) (ports.ConsentDecision, error) {
+func (f *fakePolicy) AuthorizeConsent(context.Context, string, string, []string, []string) (ports.ConsentDecision, error) {
 	return f.consentDecision, f.consentErr
 }

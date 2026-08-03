@@ -74,6 +74,23 @@ func (s *MemoryStore) removeExpiredLocked() {
 	}
 }
 
+// Get returns an unexpired transaction without consuming it.
+func (s *MemoryStore) Get(_ context.Context, handle string) (domain.Transaction, error) {
+	if handle == "" {
+		return domain.Transaction{}, domain.ErrInvalidTransaction
+	}
+	s.mu.Lock()
+	transaction, exists := s.data[handle]
+	s.mu.Unlock()
+	if !exists {
+		return domain.Transaction{}, domain.ErrReplay
+	}
+	if !transaction.ExpiresAt.After(s.now()) {
+		return domain.Transaction{}, domain.ErrExpiredTransaction
+	}
+	return cloneTransaction(transaction), nil
+}
+
 // Consume atomically removes and returns an unexpired transaction.
 func (s *MemoryStore) Consume(_ context.Context, handle string) (domain.Transaction, error) {
 	if handle == "" {

@@ -74,14 +74,16 @@ The server reads configuration from environment variables:
 | `KRATOS_PUBLIC_URL` | Kratos public session API URL. |
 | `KRATOS_SESSION_COOKIE` | Kratos browser cookie name, default `ory_kratos_session`. |
 | `REQUIRED_AAL` | Minimum assurance level, default `aal2`. |
-| `TRANSACTION_TTL` | Browser transaction lifetime, default `5m`. |
+| `TRANSACTION_TTL` | Browser transaction lifetime, default `5m`, maximum `15m`. |
+| `MAX_PENDING_TRANSACTIONS` | Per-process pending transaction quota, default `10000`. |
 | `ALLOWED_CLIENTS` | JSON client and scope allowlist. |
 | `ALLOWED_SUBJECTS` | Comma-separated subjects for the local policy adapter. |
-| `HYDRA_ADMIN_TOKEN` | Optional runtime bearer token for Hydra admin requests. |
+| `ALLOWED_SUBJECT_SCOPES` | JSON subject/client/scope policy required outside development and test. |
+| `HYDRA_ADMIN_TOKEN` | Runtime bearer token for Hydra admin requests; required outside development and test. |
 | `STATE_STORE` | Transaction store, `memory` by default or `redis`. Production requires `redis`. |
-| `REDIS_URL` | Redis/Valkey connection URL when `STATE_STORE=redis`. |
-| `REDIS_KEY_PREFIX` | Optional Redis key prefix, default `transaction:`. |
-| `ENVIRONMENT` | Set to `production` to reject the local memory store. |
+| `REDIS_URL` | Redis/Valkey connection URL when `STATE_STORE=redis`; production requires `rediss://`. |
+| `REDIS_KEY_PREFIX` | Redis key prefix; required and environment-specific outside development and test. |
+| `ENVIRONMENT` | `development` or `test` permit local transports; other values require secure production settings. |
 
 The application defaults to the in-memory store when `STATE_STORE` is unset. Use
 `.env.example` for a Redis-backed local setup; Redis/Valkey is required for
@@ -94,10 +96,14 @@ replicas and production deployments.
   "example-client": {
     "allowed_redirect_uris": ["https://client.example/callback"],
     "allowed_post_logout_redirect_uris": ["https://client.example/"],
-    "allowed_scopes": ["openid", "profile"]
+    "allowed_scopes": ["openid", "profile"],
+    "allowed_audiences": ["example-api"]
   }
 }
 ```
+
+Outside development and test, `ALLOWED_SUBJECT_SCOPES` is required and must
+explicitly authorize each subject/client/scope combination.
 
 ## Development
 

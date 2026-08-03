@@ -35,6 +35,30 @@ func TestMemoryStore_ConsumeIsSingleUse(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_GetDoesNotConsume(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	store := NewMemoryStore(func() time.Time { return now })
+	handle, err := store.Create(context.Background(), domain.Transaction{
+		Flow:         domain.FlowLogin,
+		Challenge:    "challenge",
+		CSRFToken:    "csrf",
+		BrowserState: "browser-state",
+		ClientID:     "client",
+		ExpiresAt:    now.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("create transaction: %v", err)
+	}
+	if _, err := store.Get(context.Background(), handle); err != nil {
+		t.Fatalf("get transaction: %v", err)
+	}
+	if _, err := store.Consume(context.Background(), handle); err != nil {
+		t.Fatalf("consume after get: %v", err)
+	}
+}
+
 func TestMemoryStore_ExpiredTransactionCannotBeCreatedOrConsumed(t *testing.T) {
 	t.Parallel()
 

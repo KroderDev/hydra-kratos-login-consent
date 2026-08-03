@@ -21,9 +21,10 @@ The service must independently validate:
 - The Hydra challenge.
 - The OAuth client and requested redirect URI.
 - The external UI transaction state.
+- The provider-issued browser-state cookie bound to that transaction.
 - The Kratos session.
 - The required authenticator assurance level.
-- The authorization policy for the client and requested scopes.
+- The authorization policy for the client, requested scopes, and audiences.
 
 The browser may carry cookies and opaque transaction handles, but it must never
 carry Hydra admin credentials or policy decisions that the service accepts
@@ -56,6 +57,7 @@ without verification.
 - Hydra login and consent provider behavior.
 - Server-side Kratos session validation.
 - Client, redirect URI, and scope policy.
+- Browser-bound login, consent, and logout handoffs.
 - Application-specific authorization policy integration.
 - Token claim construction.
 
@@ -85,7 +87,8 @@ The service does not use a relational database or gRPC. Its only application
 state is short-lived browser transaction state, which is currently implemented
 in memory for tests and local development. The Redis/Valkey outbound adapter
 stores serialized transactions with expiry and atomically consumes them for
-release deployments and replica-safe operation.
+release deployments and replica-safe operation. The application also applies a
+bounded pending-transaction quota.
 
 ## Deployment Boundary
 

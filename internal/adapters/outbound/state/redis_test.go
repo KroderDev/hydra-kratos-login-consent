@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,6 +56,29 @@ func TestRedisStore_Ready(t *testing.T) {
 	defer cleanup()
 	if err := store.Ready(context.Background()); err != nil {
 		t.Fatalf("ready: %v", err)
+	}
+}
+
+func TestValidateRedisURLRejectsUnsafeTLSOptions(t *testing.T) {
+	t.Parallel()
+
+	if err := ValidateRedisURL("rediss://redis.example/0?skip_verify=true", true); err == nil {
+		t.Fatal("ValidateRedisURL accepted skip_verify=true")
+	}
+	if err := ValidateRedisURL("redis://redis.example/0", true); err == nil {
+		t.Fatal("ValidateRedisURL accepted plaintext Redis outside development")
+	}
+}
+
+func TestNewRedisStoreRedactsMalformedURLCredentials(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewRedisStore("redis://:super-secret%zz@redis.example/0", "test:")
+	if err == nil {
+		t.Fatal("NewRedisStore accepted malformed Redis URL")
+	}
+	if strings.Contains(err.Error(), "super-secret") {
+		t.Fatalf("Redis credential leaked in error: %v", err)
 	}
 }
 

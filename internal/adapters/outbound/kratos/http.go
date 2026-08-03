@@ -33,7 +33,11 @@ func New(baseURL *url.URL, httpClient *http.Client) (*Client, error) {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
-	return &Client{baseURL: baseURL, httpClient: httpClient}, nil
+	client := *httpClient
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &Client{baseURL: baseURL, httpClient: &client}, nil
 }
 
 // ValidateSession asks Kratos to validate opaque browser credentials.

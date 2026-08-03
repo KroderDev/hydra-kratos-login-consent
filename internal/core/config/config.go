@@ -16,6 +16,7 @@ type Client struct {
 	AllowedRedirectURIs        []string            `json:"allowed_redirect_uris"`
 	AllowedPostLogoutRedirects []string            `json:"allowed_post_logout_redirect_uris"`
 	AllowedScopes              []string            `json:"allowed_scopes"`
+	AllowedAudiences           []string            `json:"allowed_audiences"`
 	SkipConsent                bool                `json:"skip_consent"`
 	AllowedIDTokenClaims       map[string][]string `json:"allowed_id_token_claims"`
 	AllowedAccessTokenClaims   map[string][]string `json:"allowed_access_token_claims"`
@@ -23,36 +24,45 @@ type Client struct {
 
 // Config contains validated provider configuration.
 type Config struct {
-	ListenAddress       string
-	ProviderURL         *url.URL
-	ExternalUIURL       *url.URL
-	HydraAdminURL       *url.URL
-	HydraPublicURL      *url.URL
-	KratosPublicURL     *url.URL
-	KratosSessionCookie string
-	RequiredAAL         string
-	TransactionTTL      time.Duration
-	Clients             map[string]Client
+	ListenAddress          string
+	Environment            string
+	ProviderURL            *url.URL
+	ExternalUIURL          *url.URL
+	HydraAdminURL          *url.URL
+	HydraPublicURL         *url.URL
+	KratosPublicURL        *url.URL
+	KratosSessionCookie    string
+	RequiredAAL            string
+	TransactionTTL         time.Duration
+	MaxPendingTransactions int
+	Clients                map[string]Client
 }
+
+const (
+	DefaultTransactionTTL         = 5 * time.Minute
+	MaxTransactionTTL             = 15 * time.Minute
+	DefaultMaxPendingTransactions = 10_000
+)
 
 // Validate rejects unsafe or incomplete provider configuration.
 func (c Config) Validate() error {
 	if c.ListenAddress == "" {
 		return fmt.Errorf("listen address is required")
 	}
-	if err := validateURL(c.ProviderURL, "provider URL"); err != nil {
+	secureTransport := c.secureTransportRequired()
+	if err := validateURL(c.ProviderURL, "provider URL", secureTransport); err != nil {
 		return err
 	}
-	if err := validateURL(c.ExternalUIURL, "external UI URL"); err != nil {
+	if err := validateURL(c.ExternalUIURL, "external UI URL", secureTransport); err != nil {
 		return err
 	}
-	if err := validateURL(c.HydraAdminURL, "Hydra admin URL"); err != nil {
+	if err := validateURL(c.HydraAdminURL, "Hydra admin URL", secureTransport); err != nil {
 		return err
 	}
-	if err := validateURL(c.HydraPublicURL, "Hydra public URL"); err != nil {
+	if err := validateURL(c.HydraPublicURL, "Hydra public URL", secureTransport); err != nil {
 		return err
 	}
-	if err := validateURL(c.KratosPublicURL, "Kratos public URL"); err != nil {
+	if err := validateURL(c.KratosPublicURL, "Kratos public URL", secureTransport); err != nil {
 		return err
 	}
 	if c.KratosSessionCookie == "" {
@@ -61,8 +71,11 @@ func (c Config) Validate() error {
 	if c.RequiredAAL != "" && !domain.AALAtLeast(c.RequiredAAL, c.RequiredAAL) {
 		return fmt.Errorf("unsupported required aal %q", c.RequiredAAL)
 	}
-	if c.TransactionTTL <= 0 {
-		return fmt.Errorf("transaction TTL must be positive")
+	if c.TransactionTTL <= 0 || c.TransactionTTL > MaxTransactionTTL {
+		return fmt.Errorf("transaction TTL must be between 1s and %s", MaxTransactionTTL)
+	}
+	if c.MaxPendingTransactions < 0 {
+		return fmt.Errorf("max pending transactions cannot be negative")
 	}
 	for id, client := range c.Clients {
 		if client.ID != id {
@@ -72,12 +85,34 @@ func (c Config) Validate() error {
 			return fmt.Errorf("client %q has no allowed redirect uris", id)
 		}
 		for _, value := range append(append([]string{}, client.AllowedRedirectURIs...), client.AllowedPostLogoutRedirects...) {
-			if err := validateAbsoluteURL(value); err != nil {
+			if err := validateAbsoluteURL(value, secureTransport); err != nil {
 				return fmt.Errorf("client %q: %w", id, err)
+			}
+		}
+		if hasDuplicates(client.AllowedAudiences) {
+			return fmt.Errorf("client %q has duplicate allowed audiences", id)
+		}
+		for _, audience := range client.AllowedAudiences {
+			if strings.TrimSpace(audience) == "" {
+				return fmt.Errorf("client %q has an empty allowed audience", id)
 			}
 		}
 	}
 	return nil
+}
+
+// EffectiveMaxPendingTransactions returns the configured quota or the bounded
+// default used by callers that construct Config directly.
+func (c Config) EffectiveMaxPendingTransactions() int {
+	if c.MaxPendingTransactions <= 0 {
+		return DefaultMaxPendingTransactions
+	}
+	return c.MaxPendingTransactions
+}
+
+func (c Config) secureTransportRequired() bool {
+	environment := strings.ToLower(strings.TrimSpace(c.Environment))
+	return environment != "" && environment != "development" && environment != "test"
 }
 
 // Client returns the configured client policy for id.
@@ -88,7 +123,7 @@ func (c Config) Client(id string) (Client, bool) {
 
 // ExternalRedirect builds a fixed-origin external UI handoff URL.
 func (c Config) ExternalRedirect(flow domain.Flow, transaction, csrfToken string) (string, error) {
-	if transaction == "" || csrfToken == "" {
+	if (flow != domain.FlowLogin && flow != domain.FlowConsent && flow != domain.FlowLogout) || transaction == "" || csrfToken == "" {
 		return "", domain.ErrInvalidTransaction
 	}
 	redirect := *c.ExternalUIURL
@@ -120,9 +155,13 @@ func (c Config) ExternalConsentRedirect(transaction, csrfToken, clientName strin
 
 // CallbackURL returns the provider callback for a configured flow.
 func (c Config) CallbackURL(flow domain.Flow) string {
-	path := "/login/callback"
-	if flow == domain.FlowConsent {
-		path = "/consent"
+	path := map[domain.Flow]string{
+		domain.FlowLogin:   "/login/callback",
+		domain.FlowConsent: "/consent",
+		domain.FlowLogout:  "/logout",
+	}[flow]
+	if path == "" {
+		path = "/login/callback"
 	}
 	base := *c.ProviderURL
 	base.Path = strings.TrimRight(base.Path, "/") + path
@@ -148,12 +187,15 @@ func (c Config) OriginAllowed(value string) bool {
 	return parsed.Scheme == c.ExternalUIURL.Scheme && parsed.Host == c.ExternalUIURL.Host
 }
 
-func validateURL(value *url.URL, name string) error {
+func validateURL(value *url.URL, name string, requireHTTPS bool) error {
 	if value == nil {
 		return fmt.Errorf("%s is required", name)
 	}
 	if value.Scheme != "http" && value.Scheme != "https" {
 		return fmt.Errorf("%s must use http or https", name)
+	}
+	if requireHTTPS && value.Scheme != "https" {
+		return fmt.Errorf("%s must use https outside development and test", name)
 	}
 	if value.Host == "" || value.User != nil || value.Fragment != "" {
 		return fmt.Errorf("%s must be an origin URL without credentials or fragments", name)
@@ -161,10 +203,24 @@ func validateURL(value *url.URL, name string) error {
 	return nil
 }
 
-func validateAbsoluteURL(value string) error {
+func validateAbsoluteURL(value string, requireHTTPS bool) error {
 	parsed, err := url.Parse(value)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return fmt.Errorf("invalid absolute URL %q", value)
 	}
+	if requireHTTPS && parsed.Scheme != "https" {
+		return fmt.Errorf("invalid non-https URL %q outside development and test", value)
+	}
 	return nil
+}
+
+func hasDuplicates(values []string) bool {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if _, exists := seen[value]; exists {
+			return true
+		}
+		seen[value] = struct{}{}
+	}
+	return false
 }

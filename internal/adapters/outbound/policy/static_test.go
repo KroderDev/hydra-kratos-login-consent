@@ -54,12 +54,32 @@ func TestStaticConsentClonesClaims(t *testing.T) {
 	policy := NewStatic([]string{"operator-1"}, nil)
 	policy.Claims = domain.Claims{IDToken: map[string]any{"email": "operator@example.com"}}
 
-	decision, err := policy.AuthorizeConsent(context.Background(), "operator-1", "client-1", nil)
+	decision, err := policy.AuthorizeConsent(context.Background(), "operator-1", "client-1", nil, nil)
 	if err != nil {
 		t.Fatalf("AuthorizeConsent: %v", err)
 	}
 	decision.Claims.IDToken["email"] = "changed"
 	if got := policy.Claims.IDToken["email"]; got != "operator@example.com" {
 		t.Fatalf("policy claim mutated through decision: %v", got)
+	}
+}
+
+func TestStaticConsentRequiresConfiguredSubjectScopes(t *testing.T) {
+	t.Parallel()
+
+	policy := NewStaticWithScopes(
+		[]string{"operator-1"},
+		[]string{"client-1"},
+		map[string]map[string][]string{
+			"operator-1": {"client-1": {"openid"}},
+		},
+		true,
+	)
+	decision, err := policy.AuthorizeConsent(context.Background(), "operator-1", "client-1", []string{"profile"}, nil)
+	if err != nil {
+		t.Fatalf("AuthorizeConsent: %v", err)
+	}
+	if decision.Allowed {
+		t.Fatal("consent allowed for an unconfigured subject scope")
 	}
 }

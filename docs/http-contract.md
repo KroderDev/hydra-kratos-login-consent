@@ -7,7 +7,8 @@ Kratos APIs are never proxied to the browser or external UI.
 
 1. Hydra redirects the browser to `GET /login?login_challenge=...`.
 2. The provider retrieves and validates the challenge through Hydra admin.
-3. The provider creates a short-lived, single-use transaction handle.
+3. The provider creates a short-lived, single-use transaction handle and binds
+   it to a provider browser-state cookie.
 4. The browser is redirected to the configured external UI with:
 
    - `flow=login`
@@ -17,7 +18,8 @@ Kratos APIs are never proxied to the browser or external UI.
 
 5. The external UI completes the Kratos browser flow and sends the browser to
    `GET /login/callback?transaction=...&csrf=...`.
-6. The provider validates the Kratos session and AAL, evaluates policy, and
+6. The provider validates the browser-state cookie, Kratos session and AAL,
+   evaluates policy, and
    accepts or rejects the original Hydra challenge.
 
 The Hydra challenge and any provider credentials are never included in the UI
@@ -26,30 +28,36 @@ redirect.
 ## Consent
 
 1. Hydra redirects the browser to `GET /consent?consent_challenge=...`.
-2. The provider validates the client and requested scopes, creates a single-use
-   transaction, and redirects to the external UI.
+2. The provider validates the client, requested scopes and audiences, creates a
+   single-use transaction bound to a browser-state cookie, and redirects to the
+   external UI.
 3. The UI receives safe display data in addition to the opaque transaction:
 
    - `flow=consent`
    - `transaction=<opaque handle>`
    - `csrf=<opaque single-use token>`
-   - `client_name=<display name>`
-   - `scope=<space-separated validated scopes>`
+    - `client_name=<display name>`
+    - `scope=<space-separated validated scopes>`
+    - `skip_consent=true` when configured first-party policy permits an automatic UI submission
    - `return_to=<fixed provider consent endpoint>`
 
 4. The UI submits `POST /consent` as a form with `transaction`, `csrf`,
    `decision`, and zero or more `grant_scope` fields. Optional `remember` and
    `remember_for` fields are forwarded to Hydra.
 5. The request must include an `Origin` matching the configured external UI
-   origin. The provider independently validates the transaction, Kratos
-   session, requested scope subset, policy result, and token claims.
+   origin and the browser-state cookie. The provider independently validates the
+   transaction, Kratos session, requested scope subset, policy result, and token
+   claims.
 
 The UI-provided subject, policy result, and claim values are never trusted.
 
 ## Logout
 
 `GET /logout?logout_challenge=...` validates the client and post-logout return
-URI before completing the Hydra logout challenge.
+URI, then starts a browser-bound external UI handoff. The UI completes it with
+`POST /logout` as a form containing `transaction` and `csrf`, with an `Origin`
+matching the configured external UI origin. Only then does the provider accept
+the Hydra logout challenge.
 
 ## Operational Endpoints
 

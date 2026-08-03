@@ -3,9 +3,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -36,12 +38,31 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
 	}
-	if err := validateStateConfiguration(); err != nil {
+	if err := validateStateConfiguration(cfg); err != nil {
 		return err
 	}
+	adminToken := strings.TrimSpace(os.Getenv("HYDRA_ADMIN_TOKEN"))
+	if secureEnvironment(cfg.Environment) && adminToken == "" {
+		return fmt.Errorf("HYDRA_ADMIN_TOKEN is required outside development and test")
+	}
 
-	httpClient := &http.Client{Timeout: 10 * time.Second}
-	hydraClient, err := hydra.New(cfg.HydraAdminURL, httpClient, os.Getenv("HYDRA_ADMIN_TOKEN"))
+	httpClient := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   3 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   3 * time.Second,
+			ResponseHeaderTimeout: 8 * time.Second,
+			IdleConnTimeout:       30 * time.Second,
+			MaxIdleConns:          64,
+			MaxIdleConnsPerHost:   16,
+			MaxConnsPerHost:       64,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
+	hydraClient, err := hydra.New(cfg.HydraAdminURL, httpClient, adminToken)
 	if err != nil {
 		return fmt.Errorf("create hydra client: %w", err)
 	}
@@ -49,7 +70,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("create kratos client: %w", err)
 	}
-	transactionStore, closeState, err := newTransactionStore()
+	transactionStore, closeState, err := newTransactionStore(cfg)
 	if err != nil {
 		return err
 	}
@@ -62,7 +83,19 @@ func run() error {
 	if checker, ok := transactionStore.(ports.Readiness); ok {
 		readiness = append(readiness, checker)
 	}
-	providerPolicy := policy.NewStatic(csvValues(os.Getenv("ALLOWED_SUBJECTS")), clientIDs(cfg))
+	subjectScopes, err := subjectScopeRules(os.Getenv("ALLOWED_SUBJECT_SCOPES"))
+	if err != nil {
+		return err
+	}
+	if secureEnvironment(cfg.Environment) && len(subjectScopes) == 0 {
+		return fmt.Errorf("ALLOWED_SUBJECT_SCOPES is required outside development and test")
+	}
+	providerPolicy := policy.NewStaticWithScopes(
+		csvValues(os.Getenv("ALLOWED_SUBJECTS")),
+		clientIDs(cfg),
+		subjectScopes,
+		secureEnvironment(cfg.Environment),
+	)
 	service, err := application.NewService(cfg, application.Dependencies{
 		Login:     hydraClient,
 		Consent:   hydraClient,
@@ -104,7 +137,7 @@ func run() error {
 	case err := <-serverErrors:
 		return fmt.Errorf("serve http: %w", err)
 	case <-ctx.Done():
-		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownContext); err != nil {
 			return fmt.Errorf("shutdown http server: %w", err)
@@ -126,7 +159,7 @@ func newLogger(value string) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 }
 
-func validateStateConfiguration() error {
+func validateStateConfiguration(cfg config.Config) error {
 	store := strings.ToLower(strings.TrimSpace(os.Getenv("STATE_STORE")))
 	if store == "" {
 		store = "memory"
@@ -134,25 +167,42 @@ func validateStateConfiguration() error {
 	if store != "memory" && store != "redis" {
 		return fmt.Errorf("unsupported state_store %q: want memory or redis", store)
 	}
-	if store == "memory" && strings.EqualFold(strings.TrimSpace(os.Getenv("ENVIRONMENT")), "production") {
-		return fmt.Errorf("memory state store cannot be used in production")
+	if store == "memory" && secureEnvironment(cfg.Environment) {
+		return fmt.Errorf("memory state store cannot be used outside development and test")
 	}
 	if store == "redis" && strings.TrimSpace(os.Getenv("REDIS_URL")) == "" {
 		return fmt.Errorf("REDIS_URL is required for redis state store")
 	}
+	if store == "redis" {
+		if err := state.ValidateRedisURL(os.Getenv("REDIS_URL"), secureEnvironment(cfg.Environment)); err != nil {
+			return err
+		}
+		if secureEnvironment(cfg.Environment) && strings.TrimSpace(os.Getenv("REDIS_KEY_PREFIX")) == "" {
+			return fmt.Errorf("REDIS_KEY_PREFIX is required outside development and test")
+		}
+	}
 	return nil
 }
 
-func newTransactionStore() (ports.TransactionStore, func() error, error) {
+func newTransactionStore(cfg config.Config) (ports.TransactionStore, func() error, error) {
 	store := strings.ToLower(strings.TrimSpace(os.Getenv("STATE_STORE")))
 	if store == "" || store == "memory" {
 		return state.NewMemoryStore(time.Now), func() error { return nil }, nil
 	}
-	redisStore, err := state.NewRedisStore(os.Getenv("REDIS_URL"), os.Getenv("REDIS_KEY_PREFIX"))
+	keyPrefix := strings.TrimSpace(os.Getenv("REDIS_KEY_PREFIX"))
+	if keyPrefix == "" {
+		keyPrefix = "hydra-kratos-login-consent:" + strings.ToLower(strings.TrimSpace(cfg.Environment)) + ":transaction:"
+	}
+	redisStore, err := state.NewRedisStore(os.Getenv("REDIS_URL"), keyPrefix)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create redis state store: %w", err)
 	}
 	return redisStore, redisStore.Close, nil
+}
+
+func secureEnvironment(environment string) bool {
+	environment = strings.ToLower(strings.TrimSpace(environment))
+	return environment != "" && environment != "development" && environment != "test"
 }
 
 func csvValues(value string) []string {
@@ -164,6 +214,18 @@ func csvValues(value string) []string {
 		}
 	}
 	return values
+}
+
+func subjectScopeRules(value string) (map[string]map[string][]string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	var rules map[string]map[string][]string
+	if err := json.Unmarshal([]byte(value), &rules); err != nil {
+		return nil, fmt.Errorf("parse allowed_subject_scopes: %w", err)
+	}
+	return rules, nil
 }
 
 func clientIDs(cfg config.Config) []string {

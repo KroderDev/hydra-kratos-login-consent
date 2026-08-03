@@ -20,6 +20,12 @@ coverage.*
 *.log
 *.prof
 *.test
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
 *.swp
 *.swo
 *~

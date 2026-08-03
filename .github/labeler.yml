@@ -1,0 +1,70 @@
+core:
+  - changed-files:
+      - any-glob-to-any-file: internal/core/**
+
+http:
+  - changed-files:
+      - any-glob-to-any-file: internal/adapters/inbound/http/**
+
+hydra:
+  - changed-files:
+      - any-glob-to-any-file: internal/adapters/outbound/hydra/**
+
+kratos:
+  - changed-files:
+      - any-glob-to-any-file: internal/adapters/outbound/kratos/**
+
+policy:
+  - changed-files:
+      - any-glob-to-any-file: internal/adapters/outbound/policy/**
+
+state:
+  - changed-files:
+      - any-glob-to-any-file: internal/adapters/outbound/state/**
+
+config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - internal/config/**
+          - internal/core/config/**
+
+cmd:
+  - changed-files:
+      - any-glob-to-any-file: cmd/**
+
+e2e:
+  - changed-files:
+      - any-glob-to-any-file: internal/e2e/**
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+          - "*.md"
+          - CONTRIBUTING.md
+          - LICENSE
+          - NOTICE
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+          - .golangci.yml
+          - .goreleaser.yaml
+          - release-please-config.json
+          - .release-please-manifest.json
+
+build:
+  - changed-files:
+      - any-glob-to-any-file:
+          - Dockerfile
+          - docker-compose.*.yml
+          - Makefile
+          - .dockerignore
+          - .env.example
+
+deps:
+  - changed-files:
+      - any-glob-to-any-file:
+          - go.mod
+          - go.sum

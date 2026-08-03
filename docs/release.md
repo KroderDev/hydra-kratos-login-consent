@@ -19,10 +19,13 @@ Deployments must use the digest of the verified multi-architecture image:
 ghcr.io/kroderdev/hydra-kratos-login-consent@sha256:<digest>
 ```
 
-The workflow creates a write-once `vX.Y.Z` alias for the same digest. The digest
-is the canonical deployment reference; the workflow never publishes or requires
-`latest` or mutable commit aliases. A release rerun must refuse to replace an
-existing version tag with a different digest.
+The workflow creates a `vX.Y.Z` tag for the same digest. The tag is a
+convenience alias, not a hardware-enforced immutable reference — GHCR does not
+offer immutable tags. The digest is the canonical deployment reference. The
+workflow performs a best-effort pre-check to avoid accidentally overwriting an
+existing version tag, but deployments must verify the signed digest, not rely on
+tag immutability. The workflow never publishes or requires `latest` or mutable
+commit aliases.
 
 ## Verification
 

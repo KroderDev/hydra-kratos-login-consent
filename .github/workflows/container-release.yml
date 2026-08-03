@@ -336,6 +336,13 @@ jobs:
             esac
           }
 
+          # The pre-check below is best-effort; GHCR does not offer
+          # immutable tags.  The digest is the canonical deployment
+          # reference.  A tag that already points to the expected digest
+          # is left alone; a tag that points to a different digest or
+          # cannot be inspected is rejected to avoid accidental
+          # overwrite, but the check is not atomic with the imagetools
+          # create below.
           for tag in "$VERSION_TAG"; do
             ref="$IMAGE:$tag"
             if existing="$(manifest_digest "$tag")"; then

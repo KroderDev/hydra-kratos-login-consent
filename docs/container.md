@@ -25,7 +25,8 @@ healthcheck and reports process liveness. Use `/readyz` for an orchestrator
 readiness probe. It checks Hydra and Kratos readiness and also checks Redis or
 Valkey when `STATE_STORE=redis`; it does not call the HTTP policy endpoint.
 
-The repository does not currently publish a GHCR image or provide image
-signature, SBOM, or provenance workflows. See
-[deployment.md](deployment.md#image-supply-chain) for the intended verification
-contract and do not treat a registry tag as a published release.
+The release workflow publishes the image to GHCR after scanning both platform
+digests and attaching SBOM, provenance, and keyless Cosign signature metadata.
+Deployments must use a verified digest rather than a moving tag. See the
+[image release and verification guide](release.md) and the
+[deployment image contract](deployment.md#image-supply-chain).

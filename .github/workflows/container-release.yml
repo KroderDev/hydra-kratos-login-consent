@@ -1,0 +1,452 @@
+name: Container Release
+
+on:
+  pull_request:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  pull-request:
+    if: github.event_name == 'pull_request'
+    name: Validate ${{ matrix.arch }} image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build image without publishing
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          build-args: RUN_INTEGRATION_TESTS=false
+          tags: hydra-kratos-login-consent:pr-${{ github.event.pull_request.number }}-${{ matrix.arch }}
+
+      - name: Scan image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: hydra-kratos-login-consent:pr-${{ github.event.pull_request.number }}-${{ matrix.arch }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+          vuln-type: os,library
+
+  candidate:
+    if: github.event_name == 'push'
+    name: Publish GHCR release candidate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+      candidate_ref: ${{ steps.image.outputs.candidate_ref }}
+      version_tag: ${{ steps.image.outputs.version_tag }}
+      digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR for candidate publishing
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive immutable candidate reference
+        id: image
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          version_tag="$GITHUB_REF_NAME"
+          version="${version_tag#v}"
+          if [[ ! "$version_tag" == v* || ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag must be a Docker-compatible semantic version: v<major>.<minor>.<patch>[-suffix]" >&2
+            exit 1
+          fi
+
+          image="$REGISTRY/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          candidate_tag="candidate-${version_tag}-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          candidate_ref="$image:$candidate_tag"
+
+          {
+            echo "image=$image"
+            echo "version_tag=$version_tag"
+            echo "candidate_ref=$candidate_ref"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish multi-architecture candidate
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          pull: true
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          build-args: RUN_INTEGRATION_TESTS=false
+          tags: ${{ steps.image.outputs.candidate_ref }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.image.outputs.version_tag }}
+
+  scan:
+    needs: candidate
+    name: Scan ${{ matrix.arch }} release candidate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+          - arch: arm64
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+
+    steps:
+      - name: Log in to GHCR for read-only scanning
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve ${{ matrix.arch }} platform digest
+        id: platform
+        env:
+          IMAGE: ${{ needs.candidate.outputs.image }}
+          DIGEST: ${{ needs.candidate.outputs.digest }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+
+          manifest="$(docker buildx imagetools inspect --raw "$IMAGE@$DIGEST")"
+          platform_digest="$(jq -er --arg arch "$ARCH" '
+            .manifests[]
+            | select(.platform.os == "linux" and .platform.architecture == $arch)
+            | .digest
+          ' <<< "$manifest")"
+          printf 'digest=%s\n' "$platform_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Scan the exact ${{ matrix.arch }} platform digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ needs.candidate.outputs.image }}@${{ steps.platform.outputs.digest }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+          vuln-type: os,library
+
+      - name: Upload vulnerability results
+        if: ${{ always() && hashFiles('trivy-results.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+        with:
+          sarif_file: trivy-results.sarif
+
+  promote:
+    if: needs.scan.result == 'success' && needs.sbom.result == 'success'
+    needs:
+      - candidate
+      - scan
+      - sbom
+    name: Sign and promote release image
+    runs-on: ubuntu-latest
+    environment:
+      name: container-publish
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    env:
+      IMAGE: ${{ needs.candidate.outputs.image }}
+      CANDIDATE_REF: ${{ needs.candidate.outputs.candidate_ref }}
+      DIGEST: ${{ needs.candidate.outputs.digest }}
+      VERSION_TAG: ${{ needs.candidate.outputs.version_tag }}
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR for promotion
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Revalidate candidate digest and platforms
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "invalid candidate digest: $DIGEST" >&2
+            exit 1
+          fi
+
+          candidate_digest="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$CANDIDATE_REF")"
+          if [[ "$candidate_digest" != "$DIGEST" ]]; then
+            echo "candidate tag no longer resolves to the build digest" >&2
+            exit 1
+          fi
+
+          manifest="$(docker buildx imagetools inspect --raw "$IMAGE@$DIGEST")"
+          jq -e '
+            [.manifests[]
+              | select(.platform.os == "linux")
+              | select(.platform.architecture == "amd64" or .platform.architecture == "arm64")
+              | .platform.architecture]
+            | unique
+            | sort == ["amd64", "arm64"]
+          ' <<< "$manifest" >/dev/null
+
+      - name: Generate a signed provenance attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ needs.candidate.outputs.image }}
+          subject-digest: ${{ needs.candidate.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign the exact image digest with keyless Cosign
+        run: cosign sign --yes --oidc-provider github-actions --recursive "$IMAGE@$DIGEST"
+
+      - name: Verify the keyless Cosign signature
+        env:
+          COSIGN_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/container-release.yml@refs/tags/${{ github.ref_name }}
+          COSIGN_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-identity "$COSIGN_IDENTITY" \
+            --certificate-oidc-issuer "$COSIGN_ISSUER" \
+            "$IMAGE@$DIGEST"
+
+      - name: Promote only the signed digest
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$VERSION_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "invalid version tag: $VERSION_TAG" >&2
+            exit 1
+          fi
+
+          image_path="${IMAGE#"$REGISTRY/"}"
+          registry_token="$(
+            curl --fail --silent --show-error \
+              --user "${GITHUB_ACTOR}:${GHCR_TOKEN}" \
+              "https://${REGISTRY}/token?service=${REGISTRY}&scope=repository:${image_path}:pull" |
+              jq -er '.token'
+          )"
+
+          manifest_digest() {
+            local tag="$1"
+            local response status headers digest
+
+            response="$(
+              curl --silent --show-error \
+                --output /dev/null \
+                --write-out '%{http_code}\n%{header_json}' \
+                --header "Authorization: Bearer ${registry_token}" \
+                --header 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
+                "https://${REGISTRY}/v2/${image_path}/manifests/${tag}"
+            )" || {
+              echo "failed to inspect ${IMAGE}:${tag}" >&2
+              return 1
+            }
+
+            status="${response%%$'\n'*}"
+            headers="${response#*$'\n'}"
+            case "$status" in
+              200)
+                digest="$(jq -er '."docker-content-digest"[0]' <<< "$headers")" || {
+                  echo "registry response for ${IMAGE}:${tag} has no digest" >&2
+                  return 1
+                }
+                printf '%s\n' "$digest"
+                ;;
+              404)
+                return 2
+                ;;
+              *)
+                echo "refusing to inspect ${IMAGE}:${tag}: registry returned HTTP $status" >&2
+                return 1
+                ;;
+            esac
+          }
+
+          for tag in "$VERSION_TAG"; do
+            ref="$IMAGE:$tag"
+            if existing="$(manifest_digest "$tag")"; then
+              if [[ "$existing" != "$DIGEST" ]]; then
+                echo "refusing to replace $ref ($existing != $DIGEST)" >&2
+                exit 1
+              fi
+              echo "$ref already points to the expected digest"
+              continue
+            else
+              lookup_status=$?
+            fi
+
+            if [[ "$lookup_status" -ne 2 ]]; then
+              echo "refusing to publish $ref because its current digest could not be verified" >&2
+              exit 1
+            fi
+
+            docker buildx imagetools create --tag "$ref" "$IMAGE@$DIGEST"
+            if promoted="$(manifest_digest "$tag")"; then
+              :
+            else
+              echo "unable to verify the promoted digest for $ref" >&2
+              exit 1
+            fi
+            if [[ "$promoted" != "$DIGEST" ]]; then
+              echo "promotion digest mismatch for $ref" >&2
+              exit 1
+            fi
+          done
+
+      - name: Verify promoted tags resolve to the signed digest
+        env:
+          COSIGN_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/container-release.yml@refs/tags/${{ github.ref_name }}
+          COSIGN_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          set -euo pipefail
+
+          for tag in "$VERSION_TAG"; do
+            ref="$IMAGE:$tag"
+            promoted="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$ref")"
+            if [[ "$promoted" != "$DIGEST" ]]; then
+              echo "final tag $ref does not resolve to $DIGEST" >&2
+              exit 1
+            fi
+            cosign verify \
+              --certificate-identity "$COSIGN_IDENTITY" \
+              --certificate-oidc-issuer "$COSIGN_ISSUER" \
+              "$ref"
+          done
+
+  sbom:
+    needs: candidate
+    name: Attest ${{ matrix.arch }} SBOM
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+          - arch: arm64
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR for SBOM generation
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve ${{ matrix.arch }} platform digest
+        id: platform
+        env:
+          IMAGE: ${{ needs.candidate.outputs.image }}
+          DIGEST: ${{ needs.candidate.outputs.digest }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+
+          manifest="$(docker buildx imagetools inspect --raw "$IMAGE@$DIGEST")"
+          platform_digest="$(jq -er --arg arch "$ARCH" '
+            .manifests[]
+            | select(.platform.os == "linux" and .platform.architecture == $arch)
+            | .digest
+          ' <<< "$manifest")"
+          printf 'digest=%s\n' "$platform_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SPDX SBOM for exact platform digest
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ needs.candidate.outputs.image }}@${{ steps.platform.outputs.digest }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.arch }}.spdx.json
+          syft-version: v1.42.3
+          upload-artifact: false
+          upload-release-assets: false
+          dependency-snapshot: false
+
+      - name: Attest exact platform SBOM
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ needs.candidate.outputs.image }}
+          subject-digest: ${{ steps.platform.outputs.digest }}
+          sbom-path: sbom-${{ matrix.arch }}.spdx.json
+          push-to-registry: true
+          create-storage-record: false

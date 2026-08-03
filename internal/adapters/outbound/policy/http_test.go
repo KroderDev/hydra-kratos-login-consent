@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -112,6 +113,153 @@ func TestHTTPAuthorizeLoginSendsEmptyGrantLists(t *testing.T) {
 	}
 }
 
+func TestHTTPPolicyAuthorizationMatrix(t *testing.T) {
+	t.Parallel()
+
+	bearer := "fixture-policy-bearer"
+	tests := []struct {
+		name          string
+		operation     string
+		input         ports.PolicyInput
+		wantAllowed   bool
+		wantScopes    []string
+		wantAudiences []string
+	}{
+		{
+			name:      "approved login",
+			operation: "login",
+			input: ports.PolicyInput{
+				Subject: "operator-1", ClientID: "client-1", AAL: "aal2", AMR: []string{"pwd", "totp"},
+			},
+			wantAllowed: true,
+		},
+		{
+			name:      "unknown subject denied",
+			operation: "login",
+			input: ports.PolicyInput{
+				Subject: "operator-2", ClientID: "client-1", AAL: "aal2", AMR: []string{"pwd", "totp"},
+			},
+		},
+		{
+			name:      "unknown client denied",
+			operation: "login",
+			input: ports.PolicyInput{
+				Subject: "operator-1", ClientID: "client-2", AAL: "aal2", AMR: []string{"pwd", "totp"},
+			},
+		},
+		{
+			name:      "approved consent reduces grants",
+			operation: "consent",
+			input: ports.PolicyInput{
+				Subject:            "operator-1",
+				ClientID:           "client-1",
+				RequestedScopes:    []string{"openid", "profile"},
+				GrantedScopes:      []string{"openid", "profile"},
+				RequestedAudiences: []string{"api", "reports"},
+				AAL:                "aal2",
+				AMR:                []string{"pwd", "totp"},
+			},
+			wantAllowed:   true,
+			wantScopes:    []string{"openid"},
+			wantAudiences: []string{"api"},
+		},
+		{
+			name:      "unauthorized scope denied",
+			operation: "consent",
+			input: ports.PolicyInput{
+				Subject: "operator-1", ClientID: "client-1", RequestedScopes: []string{"admin"},
+				GrantedScopes: []string{"admin"}, AAL: "aal2", AMR: []string{"pwd", "totp"},
+			},
+		},
+		{
+			name:      "unauthorized audience denied",
+			operation: "consent",
+			input: ports.PolicyInput{
+				Subject: "operator-1", ClientID: "client-1", RequestedAudiences: []string{"admin-api"},
+				AAL: "aal2", AMR: []string{"pwd", "totp"},
+			},
+		},
+		{
+			name:      "insufficient aal denied",
+			operation: "login",
+			input: ports.PolicyInput{
+				Subject: "operator-1", ClientID: "client-1", AAL: "aal1", AMR: []string{"pwd", "totp"},
+			},
+		},
+		{
+			name:      "insufficient amr denied",
+			operation: "login",
+			input: ports.PolicyInput{
+				Subject: "operator-1", ClientID: "client-1", AAL: "aal2", AMR: []string{"pwd"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newPolicyHTTPFixture(t, func(request policyRequest) policyHTTPFixtureResponse {
+				allowed := request.Subject == "operator-1" && request.ClientID == "client-1" &&
+					request.AAL == "aal2" && equalStrings(request.AMR, []string{"pwd", "totp"})
+				if containsValue(request.GrantedScopes, "admin") || containsValue(request.RequestedAudiences, "admin-api") {
+					allowed = false
+				}
+				if !allowed {
+					return policyHTTPFixtureResponse{body: policyDecisionBody(false, nil, nil)}
+				}
+				if request.Operation == "login" {
+					return policyHTTPFixtureResponse{body: policyDecisionBody(true, nil, nil)}
+				}
+				return policyHTTPFixtureResponse{
+					body: policyDecisionBody(true, firstValue(request.GrantedScopes), firstValue(request.RequestedAudiences)),
+				}
+			})
+			client, err := NewHTTP(mustURL(t, fixture.server.URL+"/v1/authorize"), fixture.server.Client(), bearer)
+			if err != nil {
+				t.Fatalf("create policy client: %v", err)
+			}
+
+			var allowed bool
+			var decision ports.ConsentDecision
+			switch tt.operation {
+			case "login":
+				allowed, err = client.AuthorizeLogin(context.Background(), tt.input)
+			case "consent":
+				decision, err = client.AuthorizeConsent(context.Background(), tt.input)
+				allowed = decision.Allowed
+			default:
+				t.Fatalf("unsupported operation %q", tt.operation)
+			}
+			if err != nil {
+				t.Fatalf("authorize %s: %v", tt.operation, err)
+			}
+			if allowed != tt.wantAllowed {
+				t.Fatalf("allowed = %t, want %t", allowed, tt.wantAllowed)
+			}
+			request := fixture.requestAt(t, 0)
+			if request.Version != contractVersion || request.Operation != tt.operation || request.Subject != tt.input.Subject || request.ClientID != tt.input.ClientID {
+				t.Fatalf("request context = %#v, want version/operation/identity %q/%q/%q/%q", request, contractVersion, tt.operation, tt.input.Subject, tt.input.ClientID)
+			}
+			if !equalStrings(request.RequestedScopes, tt.input.RequestedScopes) || !equalStrings(request.GrantedScopes, tt.input.GrantedScopes) || !equalStrings(request.RequestedAudiences, tt.input.RequestedAudiences) || request.AAL != tt.input.AAL || !equalStrings(request.AMR, tt.input.AMR) {
+				t.Fatalf("request authorization context = %#v, want scopes/audiences/aal/amr from %#v", request, tt.input)
+			}
+			if got := fixture.authorizationAt(t, 0); got != "Bearer "+bearer {
+				t.Fatalf("authorization header = %q, want policy bearer token", got)
+			}
+			if tt.operation == "consent" && tt.wantAllowed {
+				if !equalStrings(decision.GrantedScopes, tt.wantScopes) || !equalStrings(decision.GrantedAudiences, tt.wantAudiences) {
+					t.Fatalf("decision grants = %#v/%#v, want %#v/%#v", decision.GrantedScopes, decision.GrantedAudiences, tt.wantScopes, tt.wantAudiences)
+				}
+				if decision.Claims.IDToken["email"] != "operator@example.com" || decision.Claims.AccessToken["tenant"] != "tenant-a" {
+					t.Fatalf("decision claims = %#v, want application claims", decision.Claims)
+				}
+			}
+			if tt.operation == "consent" && !tt.wantAllowed && (len(decision.GrantedScopes) != 0 || len(decision.GrantedAudiences) != 0 || len(decision.Claims.IDToken) != 0 || len(decision.Claims.AccessToken) != 0) {
+				t.Fatalf("denied decision returned grants or claims: %#v", decision)
+			}
+		})
+	}
+}
+
 func TestHTTPPolicyDeniedDecisionIsFailClosed(t *testing.T) {
 	t.Parallel()
 
@@ -164,7 +312,7 @@ func TestHTTPPolicyRejectsMalformedAndUnsafeResponses(t *testing.T) {
 				_, _ = w.Write([]byte(tt.body))
 			}))
 			defer server.Close()
-			client, err := NewHTTP(mustURL(t, server.URL), server.Client(), "")
+			client, err := NewHTTP(mustURL(t, server.URL), server.Client(), "policy-auth-secret")
 			if err != nil {
 				t.Fatalf("create policy client: %v", err)
 			}
@@ -174,6 +322,9 @@ func TestHTTPPolicyRejectsMalformedAndUnsafeResponses(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "upstream-secret") {
 				t.Fatal("upstream response body was exposed in error")
+			}
+			if strings.Contains(err.Error(), "policy-auth-secret") {
+				t.Fatal("policy credential was exposed in error")
 			}
 		})
 	}
@@ -216,6 +367,71 @@ func TestHTTPPolicyMapsTimeoutToUpstreamError(t *testing.T) {
 	}
 	if _, err := client.AuthorizeLogin(context.Background(), ports.PolicyInput{Subject: "operator-1", ClientID: "client-1"}); !errors.Is(err, domain.ErrUpstream) {
 		t.Fatalf("error = %v, want upstream error", err)
+	}
+}
+
+func TestHTTPPolicyMapsConnectionFailureToUpstreamError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	endpoint := server.URL
+	server.Close()
+	client, err := NewHTTP(mustURL(t, endpoint+"/v1/authorize"), &http.Client{Timeout: time.Second}, "connection-secret")
+	if err != nil {
+		t.Fatalf("create policy client: %v", err)
+	}
+	_, err = client.AuthorizeLogin(context.Background(), ports.PolicyInput{Subject: "operator-1", ClientID: "client-1"})
+	if !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("error = %v, want upstream error", err)
+	}
+	if strings.Contains(err.Error(), "connection-secret") {
+		t.Fatal("policy credential was exposed in connection failure")
+	}
+}
+
+func TestHTTPPolicyMapsContextCancellationToUpstreamError(t *testing.T) {
+	t.Parallel()
+
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	client, err := NewHTTP(
+		mustURL(t, "https://policy.example/v1/authorize"),
+		&http.Client{Transport: cancellationRoundTripper{started: started, canceled: canceled}},
+		"timeout-secret",
+	)
+	if err != nil {
+		t.Fatalf("create policy client: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, requestErr := client.AuthorizeLogin(ctx, ports.PolicyInput{Subject: "operator-1", ClientID: "client-1"})
+		result <- requestErr
+	}()
+	select {
+	case <-started:
+	case <-result:
+		t.Fatal("policy request completed before reaching the fixture")
+	case <-time.After(time.Second):
+		t.Fatal("policy request did not reach the fixture")
+	}
+	cancel()
+	select {
+	case err = <-result:
+	case <-time.After(time.Second):
+		t.Fatal("canceled policy request did not return")
+	}
+	if !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("error = %v, want upstream error", err)
+	}
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("policy fixture did not observe request cancellation")
+	}
+	if strings.Contains(err.Error(), "timeout-secret") {
+		t.Fatal("policy credential was exposed in cancellation failure")
 	}
 }
 
@@ -333,12 +549,123 @@ func equalStrings(got, want []string) bool {
 	return true
 }
 
+type policyHTTPFixture struct {
+	server        *httptest.Server
+	mu            sync.Mutex
+	requests      []policyRequest
+	authorization []string
+	decide        func(policyRequest) policyHTTPFixtureResponse
+}
+
+type policyHTTPFixtureResponse struct {
+	status int
+	body   any
+	raw    string
+}
+
+func newPolicyHTTPFixture(t *testing.T, decide func(policyRequest) policyHTTPFixtureResponse) *policyHTTPFixture {
+	t.Helper()
+	fixture := &policyHTTPFixture{decide: decide}
+	fixture.server = httptest.NewServer(http.HandlerFunc(fixture.serveHTTP))
+	t.Cleanup(fixture.server.Close)
+	return fixture
+}
+
+func (f *policyHTTPFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || r.URL.Path != "/v1/authorize" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var request policyRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	f.mu.Lock()
+	f.requests = append(f.requests, request)
+	f.authorization = append(f.authorization, r.Header.Get("Authorization"))
+	f.mu.Unlock()
+	response := f.decide(request)
+	if response.status == 0 {
+		response.status = http.StatusOK
+	}
+	if response.raw != "" {
+		w.WriteHeader(response.status)
+		_, _ = io.WriteString(w, response.raw)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.status)
+	_ = json.NewEncoder(w).Encode(response.body)
+}
+
+func (f *policyHTTPFixture) requestAt(t *testing.T, index int) policyRequest {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if index < 0 || index >= len(f.requests) {
+		t.Fatalf("policy requests = %d, want index %d", len(f.requests), index)
+	}
+	return f.requests[index]
+}
+
+func (f *policyHTTPFixture) authorizationAt(t *testing.T, index int) string {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if index < 0 || index >= len(f.authorization) {
+		t.Fatalf("policy authorization headers = %d, want index %d", len(f.authorization), index)
+	}
+	return f.authorization[index]
+}
+
+func policyDecisionBody(allowed bool, scopes, audiences []string) map[string]any {
+	if scopes == nil {
+		scopes = []string{}
+	}
+	if audiences == nil {
+		audiences = []string{}
+	}
+	response := map[string]any{
+		"version":           contractVersion,
+		"allowed":           allowed,
+		"granted_scopes":    scopes,
+		"granted_audiences": audiences,
+	}
+	if allowed {
+		response["claims"] = map[string]any{
+			"id_token":     map[string]any{"email": "operator@example.com"},
+			"access_token": map[string]any{"tenant": "tenant-a"},
+		}
+	}
+	return response
+}
+
+func firstValue(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	return []string{values[0]}
+}
+
 type errorRoundTripper struct {
 	err error
 }
 
 func (t errorRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, t.err
+}
+
+type cancellationRoundTripper struct {
+	started  chan<- struct{}
+	canceled chan<- struct{}
+}
+
+func (t cancellationRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	close(t.started)
+	<-request.Context().Done()
+	close(t.canceled)
+	return nil, request.Context().Err()
 }
 
 type responseRoundTripper struct {

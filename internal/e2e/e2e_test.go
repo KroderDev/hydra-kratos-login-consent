@@ -20,6 +20,7 @@ import (
 	inboundhttp "github.com/kroderdev/hydra-kratos-login-consent/internal/adapters/inbound/http"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/adapters/outbound/hydra"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/adapters/outbound/kratos"
+	"github.com/kroderdev/hydra-kratos-login-consent/internal/adapters/outbound/policy"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/adapters/outbound/state"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/config"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/application"
@@ -48,8 +49,9 @@ func TestE2E_LoginConsentLogout(t *testing.T) {
 	if got := requireRedirect(t, callbackResponse).String(); got != fixture.hydra.redirect("oauth2/auth/callback") {
 		t.Fatalf("login callback redirect = %q, want Hydra redirect", got)
 	}
-	if fixture.hydra.loginAcceptance.Subject != "operator-1" || !fixture.hydra.loginAcceptance.Remember || fixture.hydra.loginAcceptance.RememberFor != 3600 {
-		t.Fatalf("login acceptance = %#v, want authenticated remembered subject", fixture.hydra.loginAcceptance)
+	loginAcceptance := fixture.hydra.loginAcceptanceSnapshot()
+	if loginAcceptance.Subject != "operator-1" || !loginAcceptance.Remember || loginAcceptance.RememberFor != 3600 {
+		t.Fatalf("login acceptance = %#v, want authenticated remembered subject", loginAcceptance)
 	}
 
 	consentResponse := fixture.get(t, "/consent?consent_challenge=consent-challenge")
@@ -76,11 +78,36 @@ func TestE2E_LoginConsentLogout(t *testing.T) {
 	if got := requireRedirect(t, consentResult).String(); got != fixture.hydra.redirect("oauth2/consent/callback") {
 		t.Fatalf("consent redirect = %q, want Hydra redirect", got)
 	}
-	if fixture.hydra.consentAcceptance.GrantScopes[0] != "openid" || !fixture.hydra.consentAcceptance.Remember || fixture.hydra.consentAcceptance.RememberFor != 7200 {
-		t.Fatalf("consent acceptance = %#v, want reduced remembered consent", fixture.hydra.consentAcceptance)
+	consentAcceptance := fixture.hydra.consentAcceptanceSnapshot()
+	if len(consentAcceptance.GrantScopes) != 1 || consentAcceptance.GrantScopes[0] != "openid" || !consentAcceptance.Remember || consentAcceptance.RememberFor != 7200 {
+		t.Fatalf("consent acceptance = %#v, want reduced remembered consent", consentAcceptance)
 	}
-	if _, ok := fixture.hydra.consentAcceptance.Session.IDToken["role"]; ok {
+	if _, ok := consentAcceptance.Session.IDToken["role"]; ok {
 		t.Fatal("scope-gated role claim was not filtered")
+	}
+	if got := consentAcceptance.Session.IDToken["email"]; got != "operator@example.com" {
+		t.Fatalf("id-token claims = %#v, want application email claim", consentAcceptance.Session.IDToken)
+	}
+	if got := consentAcceptance.Session.AccessToken["tenant"]; got != "tenant-a" {
+		t.Fatalf("access-token claims = %#v, want application tenant claim", consentAcceptance.Session.AccessToken)
+	}
+
+	loginPolicyRequest, ok := fixture.policy.requestFor("login")
+	if !ok {
+		t.Fatal("remote policy did not receive the login request")
+	}
+	if loginPolicyRequest.Subject != "operator-1" || loginPolicyRequest.ClientID != "example-client" || loginPolicyRequest.AAL != "aal2" || !equalStrings(loginPolicyRequest.AMR, []string{"oidc", "totp"}) {
+		t.Fatalf("remote login policy request = %#v, want validated identity and assurance", loginPolicyRequest)
+	}
+	consentPolicyRequest, ok := fixture.policy.requestFor("consent")
+	if !ok {
+		t.Fatal("remote policy did not receive the consent request")
+	}
+	if consentPolicyRequest.Subject != "operator-1" || consentPolicyRequest.ClientID != "example-client" || !equalStrings(consentPolicyRequest.RequestedScopes, []string{"openid", "profile"}) || !equalStrings(consentPolicyRequest.GrantedScopes, []string{"openid"}) || !equalStrings(consentPolicyRequest.RequestedAudiences, []string{"example-api"}) || consentPolicyRequest.AAL != "aal2" || !equalStrings(consentPolicyRequest.AMR, []string{"oidc", "totp"}) {
+		t.Fatalf("remote consent policy request = %#v, want validated identity, grants, and assurance", consentPolicyRequest)
+	}
+	if got := fixture.policy.authorizationHeader(); got != "Bearer "+e2ePolicyToken {
+		t.Fatalf("remote policy authorization = %q, want bearer token", got)
 	}
 
 	logoutResponse := fixture.get(t, "/logout?logout_challenge=logout-challenge")
@@ -97,8 +124,42 @@ func TestE2E_LoginConsentLogout(t *testing.T) {
 	if got := requireRedirect(t, logoutResult).String(); got != fixture.hydra.redirect("oauth2/logout/callback") {
 		t.Fatalf("logout redirect = %q, want Hydra redirect", got)
 	}
-	if !fixture.hydra.logoutAccepted {
+	if !fixture.hydra.logoutAcceptedSnapshot() {
 		t.Fatal("logout challenge was not accepted")
+	}
+}
+
+func TestE2E_RemotePolicyFailureIsFailClosedWithoutLeakage(t *testing.T) {
+	fixture := newFixtureWithPolicy(t, e2ePolicyUnavailable)
+	start := fixture.get(t, "/consent?consent_challenge=consent-challenge")
+	location := requireRedirect(t, start)
+	form := url.Values{
+		"transaction": {location.Query().Get("transaction")},
+		"csrf":        {location.Query().Get("csrf")},
+		"decision":    {"accept"},
+		"grant_scope": {"openid"},
+	}
+	request := fixture.request(t, http.MethodPost, "/consent", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Origin", "https://ui.example")
+	request.AddCookie(&http.Cookie{Name: "ory_kratos_session", Value: "session-value"})
+	request.AddCookie(cookieNamed(t, start, "provider_consent_state"))
+	response := fixture.do(t, request)
+	redirect := requireRedirect(t, response)
+	rejection := fixture.hydra.consentRejectionSnapshot()
+	if rejection.Error != "temporarily_unavailable" {
+		t.Fatalf("rejection = %#v, want temporarily_unavailable", rejection)
+	}
+	if got := redirect.String(); got != fixture.hydra.redirect("oauth2/consent/rejected") {
+		t.Fatalf("failure redirect = %q, want Hydra rejection", got)
+	}
+	body, _ := io.ReadAll(response.Body)
+	public := string(body) + redirect.String() + rejection.Error + rejection.ErrorDescription
+	if strings.Contains(public, e2ePolicyToken) || strings.Contains(public, e2ePolicyFailureBody) {
+		t.Fatalf("public failure exposed policy credential or response body: %q", public)
+	}
+	if got := fixture.policy.authorizationHeader(); got != "Bearer "+e2ePolicyToken {
+		t.Fatalf("remote policy authorization = %q, want bearer token", got)
 	}
 }
 
@@ -183,8 +244,9 @@ func TestE2E_ConsentRejectsUnrequestedScope(t *testing.T) {
 	if response.StatusCode != http.StatusFound {
 		t.Fatalf("invalid scope status = %d, want %d Hydra rejection redirect", response.StatusCode, http.StatusFound)
 	}
-	if fixture.hydra.consentRejection.Error != "access_denied" {
-		t.Fatalf("rejection = %#v, want access_denied", fixture.hydra.consentRejection)
+	rejection := fixture.hydra.consentRejectionSnapshot()
+	if rejection.Error != "access_denied" {
+		t.Fatalf("rejection = %#v, want access_denied", rejection)
 	}
 }
 
@@ -198,7 +260,7 @@ func TestE2E_LoginRequiresTransactionCSRF(t *testing.T) {
 	if response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("invalid login csrf status = %d, want %d", response.StatusCode, http.StatusBadRequest)
 	}
-	if fixture.hydra.loginAcceptance.Subject != "" {
+	if fixture.hydra.loginAcceptanceSnapshot().Subject != "" {
 		t.Fatal("login was accepted with an invalid csrf token")
 	}
 }
@@ -206,11 +268,20 @@ func TestE2E_LoginRequiresTransactionCSRF(t *testing.T) {
 type fixture struct {
 	provider *httptest.Server
 	hydra    *hydraFixture
+	policy   *e2ePolicyFixture
 	client   *http.Client
 }
 
 func newFixture(t *testing.T) *fixture {
+	return newFixtureWithPolicy(t, e2ePolicyAllow)
+}
+
+func newFixtureWithPolicy(t *testing.T, policyMode e2ePolicyMode) *fixture {
 	t.Helper()
+	policyState := &e2ePolicyFixture{mode: policyMode}
+	policyServer := httptest.NewServer(http.HandlerFunc(policyState.serveHTTP))
+	t.Cleanup(policyServer.Close)
+
 	hydraServer := httptest.NewUnstartedServer(nil)
 	hydraURL := "http://" + hydraServer.Listener.Addr().String()
 	hydraState := &hydraFixture{baseURL: hydraURL}
@@ -286,6 +357,9 @@ func newFixture(t *testing.T) *fixture {
 					"email": nil,
 					"role":  {"profile"},
 				},
+				AllowedAccessTokenClaims: map[string][]string{
+					"tenant": nil,
+				},
 			},
 		},
 	}
@@ -297,7 +371,10 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatalf("create Kratos adapter: %v", err)
 	}
-	providerPolicy := e2ePolicy{}
+	providerPolicy, err := policy.NewHTTP(parseURL(t, policyServer.URL+"/v1/authorize"), &http.Client{Timeout: 2 * time.Second}, e2ePolicyToken)
+	if err != nil {
+		t.Fatalf("create policy adapter: %v", err)
+	}
 	service, err := application.NewService(cfg, application.Dependencies{
 		Login:     hydraClient,
 		Consent:   hydraClient,
@@ -321,6 +398,7 @@ func newFixture(t *testing.T) *fixture {
 	return &fixture{
 		provider: providerServer,
 		hydra:    hydraState,
+		policy:   policyState,
 		client:   &http.Client{Timeout: 2 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}
 }
@@ -395,6 +473,37 @@ func (f *hydraFixture) redirect(path string) string {
 	return f.baseURL + "/" + path
 }
 
+func (f *hydraFixture) loginAcceptanceSnapshot() ports.LoginAcceptance {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	acceptance := f.loginAcceptance
+	acceptance.AMR = append([]string(nil), acceptance.AMR...)
+	return acceptance
+}
+
+func (f *hydraFixture) consentAcceptanceSnapshot() ports.ConsentAcceptance {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	acceptance := f.consentAcceptance
+	acceptance.GrantScopes = append([]string(nil), acceptance.GrantScopes...)
+	acceptance.GrantAudience = append([]string(nil), acceptance.GrantAudience...)
+	acceptance.Session.IDToken = cloneMap(acceptance.Session.IDToken)
+	acceptance.Session.AccessToken = cloneMap(acceptance.Session.AccessToken)
+	return acceptance
+}
+
+func (f *hydraFixture) consentRejectionSnapshot() ports.Rejection {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.consentRejection
+}
+
+func (f *hydraFixture) logoutAcceptedSnapshot() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.logoutAccepted
+}
+
 func (f *hydraFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/health/ready":
@@ -445,7 +554,8 @@ func (f *hydraFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			Remember    bool     `json:"remember"`
 			RememberFor int64    `json:"remember_for"`
 			Session     struct {
-				IDToken map[string]any `json:"id_token"`
+				IDToken     map[string]any `json:"id_token"`
+				AccessToken map[string]any `json:"access_token"`
 			} `json:"session"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -457,7 +567,7 @@ func (f *hydraFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			GrantScopes: body.GrantScope,
 			Remember:    body.Remember,
 			RememberFor: body.RememberFor,
-			Session:     domain.Claims{IDToken: body.Session.IDToken},
+			Session:     domain.Claims{IDToken: body.Session.IDToken, AccessToken: body.Session.AccessToken},
 		}
 		f.mu.Unlock()
 		writeJSONNoTest(w, map[string]string{"redirect_to": f.redirect("oauth2/consent/callback")})
@@ -489,22 +599,155 @@ func (f *hydraFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type e2ePolicy struct{}
+const (
+	e2ePolicyToken       = "integration-policy-secret"
+	e2ePolicyFailureBody = "remote-policy-sensitive-body integration-policy-secret"
+)
 
-func (e2ePolicy) AuthorizeLogin(context.Context, ports.PolicyInput) (bool, error) {
-	return true, nil
+type e2ePolicyMode string
+
+const (
+	e2ePolicyAllow       e2ePolicyMode = "allow"
+	e2ePolicyUnavailable e2ePolicyMode = "unavailable"
+)
+
+type e2ePolicyRequest struct {
+	Version            string   `json:"version"`
+	Operation          string   `json:"operation"`
+	Subject            string   `json:"subject"`
+	ClientID           string   `json:"client_id"`
+	RequestedScopes    []string `json:"requested_scopes"`
+	GrantedScopes      []string `json:"granted_scopes"`
+	RequestedAudiences []string `json:"requested_audiences"`
+	AAL                string   `json:"aal"`
+	AMR                []string `json:"amr"`
 }
 
-func (e2ePolicy) AuthorizeConsent(_ context.Context, input ports.PolicyInput) (ports.ConsentDecision, error) {
-	return ports.ConsentDecision{
-		Allowed:          true,
-		GrantedScopes:    append([]string(nil), input.GrantedScopes...),
-		GrantedAudiences: append([]string(nil), input.RequestedAudiences...),
-		Claims: domain.Claims{IDToken: map[string]any{
-			"email": "operator@example.com",
-			"role":  "operator",
-		}},
-	}, nil
+type e2ePolicyFixture struct {
+	mu            sync.Mutex
+	mode          e2ePolicyMode
+	requests      []e2ePolicyRequest
+	authorization []string
+}
+
+func (f *e2ePolicyFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || r.URL.Path != "/v1/authorize" {
+		writeStatus(w, http.StatusNotFound)
+		return
+	}
+	var request e2ePolicyRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeStatus(w, http.StatusBadRequest)
+		return
+	}
+	f.mu.Lock()
+	f.requests = append(f.requests, request)
+	f.authorization = append(f.authorization, r.Header.Get("Authorization"))
+	mode := f.mode
+	f.mu.Unlock()
+	if mode == e2ePolicyUnavailable {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, e2ePolicyFailureBody)
+		return
+	}
+
+	allowed := request.Subject == "operator-1" && request.ClientID == "example-client" &&
+		request.Version == "v1" && (request.Operation == "login" || request.Operation == "consent")
+	if containsString(request.GrantedScopes, "admin") || containsString(request.RequestedAudiences, "admin-api") {
+		allowed = false
+	}
+	if !allowed {
+		writeJSONNoTest(w, map[string]any{
+			"version":           "v1",
+			"allowed":           false,
+			"granted_scopes":    []string{},
+			"granted_audiences": []string{},
+		})
+		return
+	}
+	if request.Operation == "login" {
+		writeJSONNoTest(w, map[string]any{
+			"version":           "v1",
+			"allowed":           true,
+			"granted_scopes":    []string{},
+			"granted_audiences": []string{},
+		})
+		return
+	}
+	grantedScopes := request.GrantedScopes
+	if grantedScopes == nil {
+		grantedScopes = []string{}
+	}
+	grantedAudiences := request.RequestedAudiences
+	if grantedAudiences == nil {
+		grantedAudiences = []string{}
+	}
+	writeJSONNoTest(w, map[string]any{
+		"version":           "v1",
+		"allowed":           true,
+		"granted_scopes":    grantedScopes,
+		"granted_audiences": grantedAudiences,
+		"claims": map[string]any{
+			"id_token":     map[string]any{"email": "operator@example.com", "role": "operator"},
+			"access_token": map[string]any{"tenant": "tenant-a"},
+		},
+	})
+}
+
+func (f *e2ePolicyFixture) requestFor(operation string) (e2ePolicyRequest, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, request := range f.requests {
+		if request.Operation == operation {
+			request.RequestedScopes = append([]string(nil), request.RequestedScopes...)
+			request.GrantedScopes = append([]string(nil), request.GrantedScopes...)
+			request.RequestedAudiences = append([]string(nil), request.RequestedAudiences...)
+			request.AMR = append([]string(nil), request.AMR...)
+			return request, true
+		}
+	}
+	return e2ePolicyRequest{}, false
+}
+
+func (f *e2ePolicyFixture) authorizationHeader() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.authorization) == 0 {
+		return ""
+	}
+	return f.authorization[0]
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneMap(source map[string]any) map[string]any {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]any, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }
 
 func writeJSON(t *testing.T, w http.ResponseWriter, value any) {

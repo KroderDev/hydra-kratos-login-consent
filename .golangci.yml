@@ -1,48 +1,61 @@
+version: "2"
 run:
+  # Keep lint runs bounded in local and CI environments.
   timeout: 5m
   tests: true
-
 linters:
   enable:
-    - govet
-    - staticcheck
-    - unused
-    - errcheck
-    - errorlint
-    - nilerr
-    - forcetypeassert
+    - bodyclose
+    - containedctx
     - copyloopvar
     - durationcheck
-    - gocritic
-    - revive
-    - whitespace
-    - misspell
-    - predeclared
     - errname
-    - ineffassign
-    - unconvert
+    - errorlint
+    - forcetypeassert
+    - gocritic
     - gosec
-    - bodyclose
-    - noctx
-    - containedctx
-    - loggercheck
-    - thelper
-    - paralleltest
     - intrange
+    - loggercheck
+    - misspell
+    - nilerr
+    - noctx
+    - paralleltest
+    - predeclared
+    - revive
+    - thelper
+    - unconvert
     - usestdlibvars
+    - whitespace
   disable:
-    - wrapcheck
+    - dupl
     - err113
     - funlen
-    - gocyclo
-    - nestif
-    - dupl
     - goconst
-    - lll
-    - wsl
+    - gocyclo
     - godot
+    - lll
+    - nestif
     - testifylint
-
+    - wrapcheck
+    - wsl
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

@@ -27,7 +27,7 @@ func TestServer_LoginHandoffDoesNotExposeChallenge(t *testing.T) {
 		Client:    testClient(),
 	}
 
-	request := httptest.NewRequest(http.MethodGet, "/login?login_challenge=login-secret", nil)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/login?login_challenge=login-secret", nil)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 
@@ -73,7 +73,7 @@ func TestServer_LoginCallbackUsesKratosCookie(t *testing.T) {
 	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2"}
 	policy.loginAllowed = true
 
-	startRequest := httptest.NewRequest(http.MethodGet, "/login?login_challenge=login-challenge", nil)
+	startRequest := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/login?login_challenge=login-challenge", nil)
 	startRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(startRecorder, startRequest)
 	if startRecorder.Code != http.StatusFound {
@@ -86,12 +86,19 @@ func TestServer_LoginCallbackUsesKratosCookie(t *testing.T) {
 	transaction := parsed.Query().Get("transaction")
 	csrfToken := parsed.Query().Get("csrf")
 
-	callbackRequest := httptest.NewRequest(
+	callbackRequest := httptest.NewRequestWithContext(
+		context.Background(),
 		http.MethodGet,
 		"/login/callback?transaction="+url.QueryEscape(transaction)+"&csrf="+url.QueryEscape(csrfToken),
 		nil,
 	)
-	callbackRequest.AddCookie(&http.Cookie{Name: "ory_kratos_session", Value: "opaque-session"})
+	callbackRequest.AddCookie(&http.Cookie{
+		Name:     "ory_kratos_session",
+		Value:    "opaque-session",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 	callbackRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(callbackRecorder, callbackRequest)
 
@@ -110,7 +117,7 @@ func TestServer_ConsentRequiresExternalOrigin(t *testing.T) {
 	t.Parallel()
 
 	handler, _, _, _ := newTestHandler(t)
-	request := httptest.NewRequest(http.MethodPost, "/consent", strings.NewReader("transaction=opaque&decision=accept"))
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/consent", strings.NewReader("transaction=opaque&decision=accept"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Origin", "https://attacker.example")
 	recorder := httptest.NewRecorder()
@@ -125,7 +132,7 @@ func TestServer_RejectsDuplicateChallengeQuery(t *testing.T) {
 	t.Parallel()
 
 	handler, _, _, _ := newTestHandler(t)
-	request := httptest.NewRequest(http.MethodGet, "/login?login_challenge=one&login_challenge=two", nil)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/login?login_challenge=one&login_challenge=two", nil)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 
@@ -138,7 +145,7 @@ func TestServer_HealthResponseIncludesSecurityHeaders(t *testing.T) {
 	t.Parallel()
 
 	handler, _, _, _ := newTestHandler(t)
-	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", nil)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 

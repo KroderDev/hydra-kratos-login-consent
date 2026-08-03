@@ -49,7 +49,13 @@ func (c *Client) ValidateSession(ctx context.Context, credentials ports.SessionC
 		return domain.Session{}, fmt.Errorf("%w: create kratos request", domain.ErrUpstream)
 	}
 	if credentials.CookieName != "" && credentials.CookieValue != "" {
-		request.AddCookie(&http.Cookie{Name: credentials.CookieName, Value: credentials.CookieValue})
+		request.AddCookie(&http.Cookie{
+			Name:     credentials.CookieName,
+			Value:    credentials.CookieValue,
+			Secure:   true,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
 	}
 	if credentials.Token != "" {
 		request.Header.Set("Authorization", "Bearer "+credentials.Token)

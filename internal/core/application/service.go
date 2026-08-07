@@ -551,7 +551,7 @@ func addQueryValue(target, name, value string) (string, error) {
 }
 
 func validateChallenge(value string) error {
-	if value == "" || len(value) > 512 || strings.ContainsAny(value, "\r\n") {
+	if value == "" || len(value) > domain.MaxChallengeLength || strings.ContainsAny(value, "\r\n") {
 		return domain.ErrInvalidChallenge
 	}
 	return nil

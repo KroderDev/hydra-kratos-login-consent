@@ -14,10 +14,15 @@ Kratos APIs are never proxied to the browser or external UI.
    - `flow=login`
    - `transaction=<opaque handle>`
    - `csrf=<opaque single-use token>`
-   - `return_to=<fixed provider callback>`
+   - `return_to=<provider callback containing the same flow state>`
+
+   The callback query is nested inside `return_to`, so its `?`, `&`, and `=`
+   separators are percent-encoded in the external UI URL. Treat `return_to` as
+   an opaque URL value and construct both URL layers with URL APIs. Do not
+   concatenate the nested query string or encode it more than once.
 
 5. The external UI completes the Kratos browser flow and sends the browser to
-   `GET /login/callback?transaction=...&csrf=...`.
+   `GET /login/callback?transaction=...&csrf=...&flow=login`.
 6. The provider validates the browser-state cookie, Kratos session and AAL,
    evaluates policy, and
    accepts or rejects the original Hydra challenge.
@@ -39,7 +44,7 @@ redirect.
    - `client_name=<display name>`
    - `scope=<space-separated validated scopes>`
    - `skip_consent=true` when configured first-party policy permits an automatic UI submission
-   - `return_to=<fixed provider consent endpoint>`
+   - `return_to=<provider consent endpoint containing the same flow state>`
 
 4. The UI submits `POST /consent` as a form with `transaction`, `csrf`,
    `decision`, and zero or more `grant_scope` fields. Optional `remember` and

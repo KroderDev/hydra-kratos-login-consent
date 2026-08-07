@@ -31,8 +31,17 @@ func TestConfigExternalRedirect(t *testing.T) {
 	if got := parsed.Query().Get("csrf"); got != "csrf-token" {
 		t.Fatalf("csrf = %q, want csrf-token", got)
 	}
-	if got := parsed.Query().Get("return_to"); got != "https://provider.example/login/callback" {
-		t.Fatalf("return_to = %q, want login callback", got)
+	returnTo := parsed.Query().Get("return_to")
+	callback, err := url.Parse(returnTo)
+	if err != nil {
+		t.Fatalf("parse return_to: %v", err)
+	}
+	if got := callback.Path; got != "/login/callback" {
+		t.Fatalf("return_to path = %q, want /login/callback", got)
+	}
+	// Callback URL should not contain sensitive parameters - they are only in the outer redirect
+	if got := callback.RawQuery; got != "" {
+		t.Fatalf("return_to should not contain query parameters, got %q", got)
 	}
 
 	if _, err := cfg.ExternalRedirect(domain.FlowLogin, "", "csrf-token"); !errors.Is(err, domain.ErrInvalidTransaction) {

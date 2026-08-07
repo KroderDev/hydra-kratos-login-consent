@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.1](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.3.0...v0.3.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* **challenge:** bump max length from 512 to 2048 for Hydra v26 compatibility ([575b491](https://github.com/KroderDev/hydra-kratos-login-consent/commit/575b4919d4dad9d29a3876c9bc62d592b439c9bd))
+* **challenge:** bump max length from 512 to 2048 for Hydra v26 compatibility ([8b356d5](https://github.com/KroderDev/hydra-kratos-login-consent/commit/8b356d5d1c311598e55ed48a57fe839cbcc7327a)), closes [#20](https://github.com/KroderDev/hydra-kratos-login-consent/issues/20)
+
+
+### Tests
+
+* **application:** cover challenge length validation boundaries ([985cc6b](https://github.com/KroderDev/hydra-kratos-login-consent/commit/985cc6b91be4ccec4732477933218786186c6190))
+
 ## [0.3.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.2.0...v0.3.0) (2026-08-03)
 
 

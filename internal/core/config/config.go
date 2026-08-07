@@ -158,6 +158,11 @@ func (c Config) ExternalRedirect(flow domain.Flow, transaction, csrfToken string
 		return "", domain.ErrInvalidTransaction
 	}
 	callback := c.callbackURL(flow)
+	callbackQuery := callback.Query()
+	callbackQuery.Set("csrf", csrfToken)
+	callbackQuery.Set("transaction", transaction)
+	callbackQuery.Set("flow", string(flow))
+	callback.RawQuery = callbackQuery.Encode()
 
 	redirect := *c.ExternalUIURL
 	query := redirect.Query()

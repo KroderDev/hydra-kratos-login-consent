@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.2](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.3.1...v0.3.2) (2026-08-07)
+
+
+### Bug Fixes
+
+* apply CodeRabbit auto-fixes ([6802b5e](https://github.com/KroderDev/hydra-kratos-login-consent/commit/6802b5e0a013bcdfeb8d2249c794de349c358f8e))
+* **auth:** preserve nested return_to query parameters ([f5db0fa](https://github.com/KroderDev/hydra-kratos-login-consent/commit/f5db0fae525578a10baaa661db013584e70c920e))
+* **auth:** preserve nested return_to query parameters ([1e14e4c](https://github.com/KroderDev/hydra-kratos-login-consent/commit/1e14e4c3c0a010f021ff752c91a5ba30a3d49557))
+
 ## [0.3.1](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.3.0...v0.3.1) (2026-08-07)
 
 

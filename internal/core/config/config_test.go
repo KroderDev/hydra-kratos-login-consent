@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -40,20 +39,9 @@ func TestConfigExternalRedirect(t *testing.T) {
 	if got := callback.Path; got != "/login/callback" {
 		t.Fatalf("return_to path = %q, want /login/callback", got)
 	}
-	if got := callback.Query().Get("csrf"); got != "csrf-token" {
-		t.Fatalf("return_to csrf = %q, want csrf-token", got)
-	}
-	if got := callback.Query().Get("transaction"); got != "opaque-handle" {
-		t.Fatalf("return_to transaction = %q, want opaque-handle", got)
-	}
-	if got := callback.Query().Get("flow"); got != "login" {
-		t.Fatalf("return_to flow = %q, want login", got)
-	}
-	if strings.Contains(parsed.RawQuery, "%2526") {
-		t.Fatal("return_to was double-encoded")
-	}
-	if !strings.Contains(parsed.RawQuery, "%26transaction%3D") || !strings.Contains(parsed.RawQuery, "%26flow%3D") {
-		t.Fatalf("return_to nested query was not encoded in the outer URL: %q", parsed.RawQuery)
+	// Callback URL should not contain sensitive parameters - they are only in the outer redirect
+	if got := callback.RawQuery; got != "" {
+		t.Fatalf("return_to should not contain query parameters, got %q", got)
 	}
 
 	if _, err := cfg.ExternalRedirect(domain.FlowLogin, "", "csrf-token"); !errors.Is(err, domain.ErrInvalidTransaction) {

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.3](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.3.2...v0.3.3) (2026-08-07)
+
+
+### Bug Fixes
+
+* **auth:** restore nested return_to callback state ([6f0d6e4](https://github.com/KroderDev/hydra-kratos-login-consent/commit/6f0d6e45520e7ac4acf4070c13725ce833f4a874))
+* **auth:** restore nested return_to callback state ([a9878d4](https://github.com/KroderDev/hydra-kratos-login-consent/commit/a9878d4c4699367b8dfc677fa764352e61bd5850))
+
 ## [0.3.2](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.3.1...v0.3.2) (2026-08-07)
 
 

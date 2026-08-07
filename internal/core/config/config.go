@@ -157,12 +157,19 @@ func (c Config) ExternalRedirect(flow domain.Flow, transaction, csrfToken string
 	if (flow != domain.FlowLogin && flow != domain.FlowConsent && flow != domain.FlowLogout) || transaction == "" || csrfToken == "" {
 		return "", domain.ErrInvalidTransaction
 	}
+	callback := c.callbackURL(flow)
+	callbackQuery := callback.Query()
+	callbackQuery.Set("csrf", csrfToken)
+	callbackQuery.Set("transaction", transaction)
+	callbackQuery.Set("flow", string(flow))
+	callback.RawQuery = callbackQuery.Encode()
+
 	redirect := *c.ExternalUIURL
 	query := redirect.Query()
 	query.Set("flow", string(flow))
 	query.Set("transaction", transaction)
 	query.Set("csrf", csrfToken)
-	query.Set("return_to", c.CallbackURL(flow))
+	query.Set("return_to", callback.String())
 	redirect.RawQuery = query.Encode()
 	return redirect.String(), nil
 }
@@ -186,6 +193,10 @@ func (c Config) ExternalConsentRedirect(transaction, csrfToken, clientName strin
 
 // CallbackURL returns the provider callback for a configured flow.
 func (c Config) CallbackURL(flow domain.Flow) string {
+	return c.callbackURL(flow).String()
+}
+
+func (c Config) callbackURL(flow domain.Flow) *url.URL {
 	path := map[domain.Flow]string{
 		domain.FlowLogin:   "/login/callback",
 		domain.FlowConsent: "/consent",
@@ -198,7 +209,7 @@ func (c Config) CallbackURL(flow domain.Flow) string {
 	base.Path = strings.TrimRight(base.Path, "/") + path
 	base.RawQuery = ""
 	base.Fragment = ""
-	return base.String()
+	return &base
 }
 
 // ExternalUIOrigin returns the scheme and authority trusted for browser POSTs.

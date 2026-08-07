@@ -539,6 +539,8 @@ func (s *Service) hydraRedirect(target string, upstreamErr error) (RedirectResul
 	return RedirectResult{URL: target}, nil
 }
 
+// addQueryValue adds or replaces a query parameter in a URL.
+// It returns the updated URL or domain.ErrInvalidRedirect if the target cannot be parsed.
 func addQueryValue(target, name, value string) (string, error) {
 	parsed, err := url.Parse(target)
 	if err != nil {
@@ -550,8 +552,9 @@ func addQueryValue(target, name, value string) (string, error) {
 	return parsed.String(), nil
 }
 
+// validateChallenge verifies that a challenge is non-empty, within the maximum allowed length, and contains no line breaks.
 func validateChallenge(value string) error {
-	if value == "" || len(value) > 512 || strings.ContainsAny(value, "\r\n") {
+	if value == "" || len(value) > domain.MaxChallengeLength || strings.ContainsAny(value, "\r\n") {
 		return domain.ErrInvalidChallenge
 	}
 	return nil

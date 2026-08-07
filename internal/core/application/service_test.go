@@ -119,6 +119,31 @@ func TestService_StartLoginRejectsHydraChallengeMismatch(t *testing.T) {
 	}
 }
 
+func TestValidateChallenge(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value string
+		want  error
+	}{
+		{name: "empty", value: "", want: domain.ErrInvalidChallenge},
+		{name: "carriage return", value: "challenge\r", want: domain.ErrInvalidChallenge},
+		{name: "newline", value: "challenge\n", want: domain.ErrInvalidChallenge},
+		{name: "oversized", value: strings.Repeat("a", domain.MaxChallengeLength+1), want: domain.ErrInvalidChallenge},
+		{name: "maximum length", value: strings.Repeat("a", domain.MaxChallengeLength), want: nil},
+		{name: "valid", value: "login-challenge", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if err := validateChallenge(tt.value); !errors.Is(err, tt.want) {
+				t.Fatalf("validateChallenge(%q) error = %v, want %v", tt.value, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestService_CompleteLoginRejectsInvalidCSRF(t *testing.T) {
 	t.Parallel()
 

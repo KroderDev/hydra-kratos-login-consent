@@ -619,6 +619,7 @@ func validateRequestedSubset(requested, granted []string) error {
 	return nil
 }
 
+// validateAudienceSubset validates that each granted audience was requested and that no audience is granted more than once.
 func validateAudienceSubset(requested, granted []string) error {
 	if hasDuplicates(granted) {
 		return domain.ErrInvalidAudience
@@ -631,6 +632,8 @@ func validateAudienceSubset(requested, granted []string) error {
 	return nil
 }
 
+// filterClaimMap selects allowed claims whose required scopes are granted, excluding reserved and identity-mapped claims. 
+// It returns nil when no claims qualify.
 func filterClaimMap(source map[string]any, allowed map[string][]string, scopes []string, identityMappings identity.ClaimMappings) map[string]any {
 	if len(source) == 0 || len(allowed) == 0 {
 		return nil
@@ -654,6 +657,7 @@ func filterClaimMap(source map[string]any, allowed map[string][]string, scopes [
 	return result
 }
 
+// filterIdentityClaimMap filters identity claims to those allowed for the client and supported by the granted scopes.
 func filterIdentityClaimMap(source map[string]any, allowed map[string][]string, scopes []string) map[string]any {
 	if len(source) == 0 || len(allowed) == 0 {
 		return nil
@@ -672,6 +676,7 @@ func filterIdentityClaimMap(source map[string]any, allowed map[string][]string, 
 	return result
 }
 
+// mergeClaims combines overlay claims into base, replacing values for duplicate claim names.
 func mergeClaims(base, overlay map[string]any) map[string]any {
 	if len(overlay) == 0 {
 		return base
@@ -685,6 +690,7 @@ func mergeClaims(base, overlay map[string]any) map[string]any {
 	return base
 }
 
+// subset reports whether every value in required is present in values.
 func subset(required, values []string) bool {
 	for _, value := range required {
 		if !contains(values, value) {

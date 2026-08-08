@@ -278,6 +278,9 @@ func hasDuplicates(values []string) bool {
 	return false
 }
 
+// validateClaimAllowlist validates claim names and their required scopes for a client.
+// It returns an error if a claim name is empty or reserved, required scopes are duplicated,
+// or a required scope is empty or absent from the client's allowed scopes.
 func validateClaimAllowlist(clientID string, claims map[string][]string, allowedScopes []string) error {
 	for name, requiredScopes := range claims {
 		if strings.TrimSpace(name) == "" {

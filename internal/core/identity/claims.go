@@ -41,7 +41,7 @@ type Mapping struct {
 type ClaimMappings map[string]Mapping
 
 // ParseJSON parses and validates the environment representation of claim
-// mappings. An empty value disables identity claim derivation.
+// mapping definitions.
 func ParseJSON(raw string, secureEnvironment bool) (ClaimMappings, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -126,14 +126,16 @@ func (m ClaimMappings) Derive(session domain.Session, secureEnvironment bool) ma
 }
 
 // IsReservedClaim reports whether name is owned by OAuth/OIDC protocol
-// processing rather than application identity data.
+// IsReservedClaim reports whether name is a reserved OAuth or OpenID Connect protocol claim.
+// The comparison is case-insensitive.
 func IsReservedClaim(name string) bool {
 	_, ok := reservedClaims[strings.ToLower(name)]
 	return ok
 }
 
 // RequiredScopes returns the protocol-required scopes for standard claims.
-// Client-specific allowlists are applied in addition to these requirements.
+// RequiredScopes identifies the standard OIDC scope required for a claim name.
+// It returns nil for claims without a corresponding standard scope.
 func RequiredScopes(name string) []string {
 	switch name {
 	case "email", "email_verified":
@@ -149,6 +151,7 @@ func RequiredScopes(name string) []string {
 	}
 }
 
+// validateClaimName validates that a claim name is non-empty and contains no surrounding whitespace or control characters.
 func validateClaimName(name string) error {
 	if name == "" || strings.TrimSpace(name) != name || strings.IndexFunc(name, unicode.IsControl) >= 0 {
 		return fmt.Errorf("claim name must be non-empty and contain no surrounding whitespace or control separators")
@@ -156,6 +159,7 @@ func validateClaimName(name string) error {
 	return nil
 }
 
+// validateMapping validates the source pointers, transformation, type, format, and standard-claim requirements for a claim mapping.
 func validateMapping(name string, mapping Mapping) error {
 	sources, err := mappingSources(mapping)
 	if err != nil {
@@ -205,6 +209,7 @@ func validateMapping(name string, mapping Mapping) error {
 	return nil
 }
 
+// mappingSources returns the mapping's configured source pointers and validates their uniqueness and presence. It returns an error if the mapping defines both source forms, neither form, an empty pointer, or duplicate pointers.
 func mappingSources(mapping Mapping) ([]string, error) {
 	hasSource := mapping.Source != ""
 	hasSources := len(mapping.Sources) > 0
@@ -229,6 +234,7 @@ func mappingSources(mapping Mapping) ([]string, error) {
 	return append([]string(nil), mapping.Sources...), nil
 }
 
+// validateStandardMapping validates the type and format requirements for a standard OIDC claim mapping.
 func validateStandardMapping(name string, mapping Mapping) error {
 	switch name {
 	case "email":
@@ -267,6 +273,7 @@ func validateStandardMapping(name string, mapping Mapping) error {
 	return nil
 }
 
+// validType reports whether value names a supported claim value type.
 func validType(value string) bool {
 	switch value {
 	case "string", "boolean", "number", "integer", "array", "object":
@@ -276,6 +283,7 @@ func validType(value string) bool {
 	}
 }
 
+// validFormat reports whether the format is supported for the specified value type.
 func validFormat(valueType, format string) bool {
 	if format == "" {
 		return true
@@ -291,6 +299,9 @@ func validFormat(valueType, format string) bool {
 	}
 }
 
+// mappingValue resolves a mapping against a source document and returns its usable value.
+// String values are trimmed, and join-space mappings combine non-empty string sources with spaces.
+// The boolean is false when the value is missing, empty, or incompatible with the mapping transform.
 func mappingValue(document map[string]any, mapping Mapping) (any, bool) {
 	sources, err := mappingSources(mapping)
 	if err != nil {
@@ -331,6 +342,7 @@ func mappingValue(document map[string]any, mapping Mapping) (any, bool) {
 	return value, true
 }
 
+// validClaimValue reports whether a claim value matches its declared type and format requirements.
 func validClaimValue(name string, mapping Mapping, value any, secureEnvironment bool) bool {
 	if !matchesType(mapping.Type, value) {
 		return false
@@ -357,6 +369,7 @@ func validClaimValue(name string, mapping Mapping, value any, secureEnvironment 
 	}
 }
 
+// validURI reports whether value is a non-empty URI without control line breaks or user information.
 func validURI(value string) bool {
 	if value == "" || strings.ContainsAny(value, "\r\n") {
 		return false
@@ -365,6 +378,7 @@ func validURI(value string) bool {
 	return err == nil && parsed.Scheme != "" && parsed.User == nil
 }
 
+// validHTTPURL reports whether value is an HTTP or HTTPS URL without user information or a fragment, requiring HTTPS in secure environments.
 func validHTTPURL(value string, secureEnvironment bool) bool {
 	if value == "" || strings.ContainsAny(value, "\r\n") {
 		return false
@@ -435,6 +449,7 @@ func isInteger(value any) bool {
 	}
 }
 
+// sourceDocument builds a source document containing cloned identity traits and public metadata.
 func sourceDocument(session domain.Session) map[string]any {
 	return map[string]any{
 		"traits":          cloneJSONValue(session.IdentityTraits),
@@ -442,6 +457,8 @@ func sourceDocument(session domain.Session) map[string]any {
 	}
 }
 
+// resolvePointer retrieves the value at an RFC 6901 JSON Pointer within a document.
+// It returns the value and true when the pointer resolves successfully, or nil and false otherwise.
 func resolvePointer(document any, pointer string) (any, bool) {
 	tokens, err := parsePointer(pointer)
 	if err != nil {
@@ -469,6 +486,8 @@ func resolvePointer(document any, pointer string) (any, bool) {
 	return current, true
 }
 
+// parsePointer parses an RFC 6901 JSON pointer into its unescaped tokens. Empty
+// pointers produce no tokens; malformed pointers return an error.
 func parsePointer(pointer string) ([]string, error) {
 	if pointer == "" {
 		return []string{}, nil

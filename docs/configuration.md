@@ -32,6 +32,7 @@ server-side credentials and policy settings described below.
 | `TRANSACTION_TTL` | `5m` | Lifetime of a browser transaction. It must be at least `1s` and no more than `15m`. |
 | `MAX_PENDING_TRANSACTIONS` | `10000` | Per-process pending transaction quota. `0` uses the default; negative values are invalid. This is not a shared global quota. |
 | `ALLOWED_CLIENTS` | empty object | JSON map of exact OAuth client and token policy allowlists. An empty map causes all client requests to be rejected. See [Client Allowlists](#client-allowlists). |
+| `OIDC_IDENTITY_CLAIM_MAPPINGS` | empty | Optional JSON map of exact, server-side mappings from sanitized Kratos traits to OIDC claims. Empty or unset derives no identity claims. See [Identity Claim Mappings](#identity-claim-mappings). |
 | `ALLOWED_SUBJECTS` | empty | Comma-separated exact subject IDs used by the static policy backend. An empty value makes the static policy deny every subject. |
 | `ALLOWED_SUBJECT_SCOPES` | empty | JSON subject-to-client-to-scope rules for the static policy backend. Required in secure environments when `POLICY_BACKEND=static`; not used by the HTTP policy backend. |
 | `POLICY_BACKEND` | `static` | `static` for the local allowlist adapter or `http` for the versioned remote policy adapter. |
@@ -66,14 +67,15 @@ The following is a generic shape. Values are examples, not credentials:
     ],
     "allowed_scopes": [
       "openid",
-      "profile"
+      "profile",
+      "email"
     ],
     "allowed_audiences": [
       "api.example"
     ],
     "skip_consent": false,
     "allowed_id_token_claims": {
-      "email": ["profile"]
+      "email": ["email"]
     },
     "allowed_access_token_claims": {}
   }
@@ -96,6 +98,65 @@ The service applies these rules with exact string matching:
 
 Keep each allowlist unique. `skip_consent` only supplies a safe display hint to
 the external UI; it does not bypass client validation or policy evaluation.
+
+## Identity Claim Mappings
+
+`OIDC_IDENTITY_CLAIM_MAPPINGS` is an opt-in JSON object keyed by the output claim
+name. Each mapping uses `sources`, an exact RFC 6901 JSON Pointer or list of
+pointers, a required JSON `type`, and an optional `format` and `transform`:
+
+```json
+{
+  "email": {
+    "sources": ["/traits/email"],
+    "type": "string",
+    "format": "email"
+  },
+  "name": {
+    "sources": ["/traits/name/given", "/traits/name/family"],
+    "type": "string",
+    "transform": "join_space"
+  },
+  "picture": {
+    "sources": ["/metadata_public/avatar_url"],
+    "type": "string",
+    "format": "uri"
+  }
+}
+```
+
+One source may also be written as `source`. A mapping with multiple sources
+must use the `join_space` transform; it joins present, non-blank string values
+in configuration order. No other transforms are supported. The bounded source
+document contains only `traits` and `metadata_public`, so valid pointers must
+select below `/traits` or `/metadata_public`. For RFC 6901, `/` inside a key is
+written as `~1` and `~` is written as `~0`; wildcards and JSONPath expressions
+are not supported. Mapping names and pointers are deployment configuration,
+never browser input.
+
+Supported types are `string`, `boolean`, `number`, `integer`, `array`, and
+`object`. String formats are `email`, `uri`, `url`, and `string`. The standard
+claims have additional validation: `email` is an email string,
+`email_verified` is an explicitly mapped boolean and is never inferred, and
+`picture` is an HTTP(S) URL. In secure environments, picture URLs must use
+HTTPS. Missing, wrong-typed, or invalid optional source values are omitted.
+Malformed mappings, reserved protocol claim names, unsupported types or
+transforms, invalid pointers, and ambiguous source lists reject startup.
+
+The standard OIDC scopes are always applied to derived identity claims:
+`email` and `email_verified` require the `email` scope; `name`, `given_name`,
+`family_name`, `picture`, and other profile claims require `profile`. A claim
+must also be present in the client's relevant `allowed_id_token_claims` or
+`allowed_access_token_claims` map. Identity claims are never copied to access
+tokens automatically.
+
+Configured identity mapping names are authoritative over same-name policy
+claims. The policy value is suppressed and the validated identity value is
+used when it is present and allowed. This prevents a policy response from
+overriding a standard identity claim while preserving existing custom policy
+claims. OAuth/OIDC protocol claims such as `sub`, `iss`, `aud`, `exp`, `iat`,
+`nbf`, `nonce`, `acr`, `amr`, and `azp` cannot be mapped or supplied through
+client policy claim allowlists; Hydra remains the owner of those claims.
 
 ## Policy Backends
 

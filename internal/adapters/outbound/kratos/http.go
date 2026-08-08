@@ -85,7 +85,13 @@ func (c *Client) ValidateSession(ctx context.Context, credentials ports.SessionC
 	if !payload.Active || payload.Identity.ID == "" {
 		return domain.Session{}, domain.ErrUnauthenticated
 	}
-	return domain.Session{Subject: payload.Identity.ID, AAL: payload.AAL, AMR: payload.AMR()}, nil
+	return domain.Session{
+		Subject:                payload.Identity.ID,
+		AAL:                    payload.AAL,
+		AMR:                    payload.AMR(),
+		IdentityTraits:         payload.Identity.Traits,
+		IdentityMetadataPublic: payload.Identity.MetadataPublic,
+	}, nil
 }
 
 // Ready checks the Kratos public health endpoint.
@@ -112,7 +118,9 @@ type sessionResponse struct {
 	AAL                   string                 `json:"authenticator_assurance_level"`
 	AuthenticationMethods []authenticationMethod `json:"authentication_methods"`
 	Identity              struct {
-		ID string `json:"id"`
+		ID             string         `json:"id"`
+		Traits         map[string]any `json:"traits"`
+		MetadataPublic map[string]any `json:"metadata_public"`
 	} `json:"identity"`
 }
 

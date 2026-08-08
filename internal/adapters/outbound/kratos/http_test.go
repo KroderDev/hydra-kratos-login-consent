@@ -1,7 +1,9 @@
 package kratos
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -24,7 +26,7 @@ func TestClient_ValidateSession(t *testing.T) {
 			t.Fatalf("session cookie = %#v, want session-value", cookie)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if _, err := w.Write([]byte(`{"active":true,"authenticator_assurance_level":"aal2","authentication_methods":[{"method":"oidc"},{"method":"totp"}],"identity":{"id":"operator-1"}}`)); err != nil {
+		if _, err := w.Write([]byte(`{"active":true,"authenticator_assurance_level":"aal2","authentication_methods":[{"method":"oidc"},{"method":"totp"}],"identity":{"id":"operator-1","traits":{"email":"operator@example.com","name":{"given":"Operator"}},"metadata_public":{"role":"reader"},"metadata_admin":{"secret":"must-not-be-retained"},"credentials":{"password":{"identifiers":["operator@example.com"]}}},"raw_cookie":"must-not-be-retained"}`)); err != nil {
 			t.Errorf("write session response: %v", err)
 		}
 	}))
@@ -50,6 +52,19 @@ func TestClient_ValidateSession(t *testing.T) {
 	}
 	if len(session.AMR) != 2 || session.AMR[1] != "totp" {
 		t.Fatalf("amr = %#v, want oidc/totp", session.AMR)
+	}
+	if session.IdentityTraits["email"] != "operator@example.com" {
+		t.Fatalf("identity traits = %#v, want sanitized traits", session.IdentityTraits)
+	}
+	if session.IdentityMetadataPublic["role"] != "reader" {
+		t.Fatalf("identity metadata = %#v, want public metadata", session.IdentityMetadataPublic)
+	}
+	encoded, err := json.Marshal(session)
+	if err != nil {
+		t.Fatalf("marshal sanitized session: %v", err)
+	}
+	if bytes.Contains(encoded, []byte("must-not-be-retained")) {
+		t.Fatalf("sanitized session retained restricted identity data: %s", encoded)
 	}
 }
 

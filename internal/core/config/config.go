@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/domain"
+	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/identity"
 )
 
 // Client contains deployment-owned allowlists for one OAuth client.
@@ -32,20 +33,21 @@ const (
 
 // Config contains validated provider configuration.
 type Config struct {
-	ListenAddress          string
-	Environment            string
-	ProviderURL            *url.URL
-	ExternalUIURL          *url.URL
-	HydraAdminURL          *url.URL
-	HydraPublicURL         *url.URL
-	KratosPublicURL        *url.URL
-	KratosSessionCookie    string
-	RequiredAAL            string
-	TransactionTTL         time.Duration
-	MaxPendingTransactions int
-	Clients                map[string]Client
-	PolicyBackend          PolicyBackend
-	PolicyURL              *url.URL
+	ListenAddress             string
+	Environment               string
+	ProviderURL               *url.URL
+	ExternalUIURL             *url.URL
+	HydraAdminURL             *url.URL
+	HydraPublicURL            *url.URL
+	KratosPublicURL           *url.URL
+	KratosSessionCookie       string
+	RequiredAAL               string
+	TransactionTTL            time.Duration
+	MaxPendingTransactions    int
+	Clients                   map[string]Client
+	PolicyBackend             PolicyBackend
+	PolicyURL                 *url.URL
+	OIDCIdentityClaimMappings identity.ClaimMappings
 }
 
 const (
@@ -86,6 +88,9 @@ func (c Config) Validate() error {
 	}
 	if c.MaxPendingTransactions < 0 {
 		return fmt.Errorf("max pending transactions cannot be negative")
+	}
+	if err := c.OIDCIdentityClaimMappings.Validate(c.IsSecureEnvironment()); err != nil {
+		return fmt.Errorf("validate oidc identity claim mappings: %w", err)
 	}
 	policyBackend := c.PolicyBackend
 	if policyBackend == "" {
@@ -144,6 +149,12 @@ func (c Config) EffectiveMaxPendingTransactions() int {
 func (c Config) secureTransportRequired() bool {
 	environment := strings.ToLower(strings.TrimSpace(c.Environment))
 	return environment != "" && environment != "development" && environment != "test"
+}
+
+// IsSecureEnvironment reports whether production transport and credential
+// requirements apply to this configuration.
+func (c Config) IsSecureEnvironment() bool {
+	return c.secureTransportRequired()
 }
 
 // Client returns the configured client policy for id.
@@ -271,6 +282,9 @@ func validateClaimAllowlist(clientID string, claims map[string][]string, allowed
 	for name, requiredScopes := range claims {
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("client %q has an empty claim name", clientID)
+		}
+		if identity.IsReservedClaim(name) {
+			return fmt.Errorf("client %q claim %q is reserved by OAuth or OIDC", clientID, name)
 		}
 		if hasDuplicates(requiredScopes) {
 			return fmt.Errorf("client %q has duplicate required scopes for claim %q", clientID, name)

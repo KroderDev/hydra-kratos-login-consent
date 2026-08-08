@@ -285,6 +285,7 @@ func TestConfigValidateClaimAllowlist(t *testing.T) {
 	}{
 		{name: "unallowlisted scope", claims: map[string][]string{"role": {"admin"}}, wantErr: true},
 		{name: "blank claim name", claims: map[string][]string{"": nil}, wantErr: true},
+		{name: "reserved protocol claim", claims: map[string][]string{"sub": nil}, wantErr: true},
 		{name: "duplicate required scopes", claims: map[string][]string{"role": {"openid", "openid"}}, wantErr: true},
 		{name: "allowed scope", claims: map[string][]string{"role": {"openid"}}, wantErr: false},
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	coreconfig "github.com/kroderdev/hydra-kratos-login-consent/internal/core/config"
+	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/identity"
 )
 
 // Client is an alias for the core configuration client contract.
@@ -76,6 +77,13 @@ func Load() (coreconfig.Config, error) {
 	if err != nil {
 		return coreconfig.Config{}, err
 	}
+	identityClaimMappings, err := identity.ParseJSON(
+		os.Getenv("OIDC_IDENTITY_CLAIM_MAPPINGS"),
+		(coreconfig.Config{Environment: environment}).IsSecureEnvironment(),
+	)
+	if err != nil {
+		return coreconfig.Config{}, fmt.Errorf("parse oidc_identity_claim_mappings: %w", err)
+	}
 
 	clients := map[string]coreconfig.Client{}
 	if raw := strings.TrimSpace(os.Getenv("ALLOWED_CLIENTS")); raw != "" {
@@ -91,20 +99,21 @@ func Load() (coreconfig.Config, error) {
 	}
 
 	cfg := coreconfig.Config{
-		ListenAddress:          envOrDefault("LISTEN_ADDR", ":8080"),
-		Environment:            environment,
-		ProviderURL:            providerURL,
-		ExternalUIURL:          externalUIURL,
-		HydraAdminURL:          hydraAdminURL,
-		HydraPublicURL:         hydraPublicURL,
-		KratosPublicURL:        kratosPublicURL,
-		KratosSessionCookie:    envOrDefault("KRATOS_SESSION_COOKIE", "ory_kratos_session"),
-		RequiredAAL:            envOrDefault("REQUIRED_AAL", "aal2"),
-		TransactionTTL:         ttl,
-		MaxPendingTransactions: maxPendingTransactions,
-		Clients:                clients,
-		PolicyBackend:          coreconfig.PolicyBackend(policyBackend),
-		PolicyURL:              policyURL,
+		ListenAddress:             envOrDefault("LISTEN_ADDR", ":8080"),
+		Environment:               environment,
+		ProviderURL:               providerURL,
+		ExternalUIURL:             externalUIURL,
+		HydraAdminURL:             hydraAdminURL,
+		HydraPublicURL:            hydraPublicURL,
+		KratosPublicURL:           kratosPublicURL,
+		KratosSessionCookie:       envOrDefault("KRATOS_SESSION_COOKIE", "ory_kratos_session"),
+		RequiredAAL:               envOrDefault("REQUIRED_AAL", "aal2"),
+		TransactionTTL:            ttl,
+		MaxPendingTransactions:    maxPendingTransactions,
+		Clients:                   clients,
+		PolicyBackend:             coreconfig.PolicyBackend(policyBackend),
+		PolicyURL:                 policyURL,
+		OIDCIdentityClaimMappings: identityClaimMappings,
 	}
 	if err := cfg.Validate(); err != nil {
 		return coreconfig.Config{}, err

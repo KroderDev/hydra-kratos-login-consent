@@ -129,6 +129,11 @@ func TestClient_ConsentAndLogoutRequests(t *testing.T) {
 			if !ok || len(got) != 1 || got[0] != "openid" {
 				t.Fatalf("grant_scope = %#v, want [openid]", got)
 			}
+			session, ok := body["session"].(map[string]any)
+			idToken, idTokenOK := session["id_token"].(map[string]any)
+			if !ok || !idTokenOK || idToken["email"] != "operator@example.com" {
+				t.Fatalf("consent session = %#v, want Hydra ID-token email", body["session"])
+			}
 			writeJSON(t, w, map[string]string{"redirect_to": "https://hydra.example/consent"})
 		case "/admin/oauth2/auth/requests/consent/reject":
 			writeJSON(t, w, map[string]string{"redirect_to": "https://hydra.example/rejected"})

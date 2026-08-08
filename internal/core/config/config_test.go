@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/domain"
+	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/identity"
 )
 
 func TestConfigExternalRedirect(t *testing.T) {
@@ -299,6 +300,44 @@ func TestConfigValidateClaimAllowlist(t *testing.T) {
 			cfg.Clients["example-client"] = client
 			if err := cfg.Validate(); (err != nil) != tt.wantErr {
 				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestConfigValidateRejectsOIDCIdentityMappingErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{
+			name: "invalid pointer",
+			mutate: func(cfg *Config) {
+				cfg.OIDCIdentityClaimMappings = identity.ClaimMappings{"role": {Source: "traits/role", Type: "string"}}
+			},
+		},
+		{
+			name: "reserved claim",
+			mutate: func(cfg *Config) {
+				cfg.OIDCIdentityClaimMappings = identity.ClaimMappings{"sub": {Source: "/traits/id", Type: "string"}}
+			},
+		},
+		{
+			name: "unsupported type",
+			mutate: func(cfg *Config) {
+				cfg.OIDCIdentityClaimMappings = identity.ClaimMappings{"role": {Source: "/traits/role", Type: "binary"}}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig(t)
+			tt.mutate(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("Validate returned nil for invalid identity claim mappings")
 			}
 		})
 	}

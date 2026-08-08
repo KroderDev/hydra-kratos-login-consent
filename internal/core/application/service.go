@@ -632,7 +632,7 @@ func validateAudienceSubset(requested, granted []string) error {
 	return nil
 }
 
-// filterClaimMap selects allowed claims whose required scopes are granted, excluding reserved and identity-mapped claims. 
+// filterClaimMap selects allowed claims whose required scopes are granted, excluding reserved and identity-mapped claims.
 // It returns nil when no claims qualify.
 func filterClaimMap(source map[string]any, allowed map[string][]string, scopes []string, identityMappings identity.ClaimMappings) map[string]any {
 	if len(source) == 0 || len(allowed) == 0 {

@@ -361,21 +361,12 @@ func validClaimValue(name string, mapping Mapping, value any, secureEnvironment 
 	case name == "picture":
 		return validHTTPURL(text, secureEnvironment)
 	case mapping.Format == "uri":
-		return validURI(text)
+		return validHTTPURL(text, secureEnvironment)
 	case mapping.Format == "url":
-		return validHTTPURL(text, false)
+		return validHTTPURL(text, secureEnvironment)
 	default:
 		return true
 	}
-}
-
-// validURI reports whether value is a non-empty URI without control line breaks or user information.
-func validURI(value string) bool {
-	if value == "" || strings.ContainsAny(value, "\r\n") {
-		return false
-	}
-	parsed, err := url.Parse(value)
-	return err == nil && parsed.Scheme != "" && parsed.User == nil
 }
 
 // validHTTPURL reports whether value is an HTTP or HTTPS URL without user information or a fragment, requiring HTTPS in secure environments.

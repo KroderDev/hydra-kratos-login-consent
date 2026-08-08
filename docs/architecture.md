@@ -111,6 +111,17 @@ remain private network services, and only explicitly required browser-facing
 provider endpoints may be exposed through an ingress, gateway, or equivalent
 edge.
 
+Any deployment runtime should provide non-secret settings through its ordinary
+configuration mechanism, inject Hydra, policy, and Redis credentials through
+its secret mechanism, use `/healthz` for liveness and `/readyz` for readiness,
+and allow the HTTP server's graceful shutdown timeout to complete. Readiness
+checks Hydra and Kratos and also checks Redis/Valkey when the Redis state store
+is configured; it does not probe the remote policy endpoint.
+
+For the complete runtime contract, including HTTPS, browser transactions,
+secret redaction, image verification, and a Kubernetes example, see
+[deployment.md](deployment.md).
+
 ## Identity Claim Boundary
 
 The Kratos adapter retains only the identity's JSON `traits` and
@@ -122,14 +133,3 @@ Redis. After consent policy approval, the core applies the configured exact RFC
 then filtered independently for ID tokens and access tokens using the client's
 existing allowlists. No identity claim is copied to an access token without an
 explicit access-token allowlist entry.
-
-Any deployment runtime should provide non-secret settings through its ordinary
-configuration mechanism, inject Hydra, policy, and Redis credentials through
-its secret mechanism, use `/healthz` for liveness and `/readyz` for readiness,
-and allow the HTTP server's graceful shutdown timeout to complete. Readiness
-checks Hydra and Kratos and also checks Redis/Valkey when the Redis state store
-is configured; it does not probe the remote policy endpoint.
-
-For the complete runtime contract, including HTTPS, browser transactions,
-secret redaction, image verification, and a Kubernetes example, see
-[deployment.md](deployment.md).

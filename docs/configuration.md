@@ -32,7 +32,7 @@ server-side credentials and policy settings described below.
 | `TRANSACTION_TTL` | `5m` | Lifetime of a browser transaction. It must be at least `1s` and no more than `15m`. |
 | `MAX_PENDING_TRANSACTIONS` | `10000` | Per-process pending transaction quota. `0` uses the default; negative values are invalid. This is not a shared global quota. |
 | `ALLOWED_CLIENTS` | empty object | JSON map of exact OAuth client and token policy allowlists. An empty map causes all client requests to be rejected. See [Client Allowlists](#client-allowlists). |
-| `OIDC_IDENTITY_CLAIM_MAPPINGS` | empty | Optional JSON map of exact, server-side mappings from sanitized Kratos traits to OIDC claims. Empty or unset derives no identity claims. See [Identity Claim Mappings](#identity-claim-mappings). |
+| `OIDC_IDENTITY_CLAIM_MAPPINGS` | empty | Optional JSON map of exact, server-side mappings from sanitized Kratos traits and public metadata to OIDC claims. Empty or unset derives no identity claims. See [Identity Claim Mappings](#identity-claim-mappings). |
 | `ALLOWED_SUBJECTS` | empty | Comma-separated exact subject IDs used by the static policy backend. An empty value makes the static policy deny every subject. |
 | `ALLOWED_SUBJECT_SCOPES` | empty | JSON subject-to-client-to-scope rules for the static policy backend. Required in secure environments when `POLICY_BACKEND=static`; not used by the HTTP policy backend. |
 | `POLICY_BACKEND` | `static` | `static` for the local allowlist adapter or `http` for the versioned remote policy adapter. |
@@ -135,7 +135,9 @@ are not supported. Mapping names and pointers are deployment configuration,
 never browser input.
 
 Supported types are `string`, `boolean`, `number`, `integer`, `array`, and
-`object`. String formats are `email`, `uri`, `url`, and `string`. The standard
+`object`. String formats are `email`, `uri`, `url`, and `string`; `uri` and
+`url` values must use HTTP or HTTPS, and secure environments require HTTPS.
+The standard
 claims have additional validation: `email` is an email string,
 `email_verified` is an explicitly mapped boolean and is never inferred, and
 `picture` is an HTTP(S) URL. In secure environments, picture URLs must use

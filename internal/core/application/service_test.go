@@ -520,6 +520,70 @@ func TestService_DoesNotDeriveIdentityClaimsWhenPolicyDenies(t *testing.T) {
 	}
 }
 
+func TestService_FilterClaimMapFiltersReservedAndMappedClaims(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, kratos, policy, _ := newTestService(t)
+	client := service.cfg.Clients["example-client"]
+	client.AllowedScopes = []string{"openid", "profile"}
+	client.AllowedIDTokenClaims = map[string][]string{"sub": nil, "role": nil, "email": nil, "custom": nil}
+	service.cfg.Clients["example-client"] = client
+	service.cfg.OIDCIdentityClaimMappings = identity.ClaimMappings{
+		"email": {Source: "/traits/email", Type: "string", Format: "email"},
+	}
+	hydra.consent = domain.ConsentRequest{
+		Challenge:       "consent-challenge",
+		Client:          testClient(),
+		Subject:         "operator-1",
+		RequestedScopes: []string{"openid", "profile"},
+	}
+	kratos.session = domain.Session{
+		Subject:        "operator-1",
+		AAL:            "aal2",
+		IdentityTraits: map[string]any{"email": "identity@example.com"},
+	}
+	policy.consentDecision = ports.ConsentDecision{
+		Allowed:       true,
+		GrantedScopes: []string{"openid", "profile"},
+		Claims: domain.Claims{
+			IDToken: map[string]any{
+				"sub":    "should-be-filtered",
+				"role":   "operator",
+				"email":  "policy@example.com",
+				"custom": "custom-value",
+			},
+		},
+	}
+	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
+	if err != nil {
+		t.Fatalf("start consent: %v", err)
+	}
+	_, err = service.CompleteConsent(context.Background(), ConsentInput{
+		Transaction:  transactionFromRedirect(t, started.URL),
+		CSRFToken:    queryValue(t, started.URL, "csrf"),
+		BrowserState: started.BrowserState,
+		Decision:     "accept",
+		GrantScopes:  []string{"openid", "profile"},
+		Credentials:  ports.SessionCredentials{CookieValue: "opaque-session"},
+	})
+	if err != nil {
+		t.Fatalf("complete consent: %v", err)
+	}
+	idToken := hydra.consentAcceptance.Session.IDToken
+	if _, ok := idToken["sub"]; ok {
+		t.Fatal("reserved claim sub was not filtered from policy claims")
+	}
+	if _, ok := idToken["email"]; ok {
+		t.Fatal("identity-mapped policy claim email was not filtered")
+	}
+	if idToken["role"] != "operator" {
+		t.Fatalf("allowed non-reserved policy claim = %#v, want operator", idToken["role"])
+	}
+	if idToken["custom"] != "custom-value" {
+		t.Fatalf("non-allowlisted policy claim = %#v, want custom-value", idToken["custom"])
+	}
+}
+
 func TestService_ConsentRejectsUnrequestedScope(t *testing.T) {
 	t.Parallel()
 

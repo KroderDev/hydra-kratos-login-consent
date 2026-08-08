@@ -14,6 +14,7 @@ import (
 
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/config"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/domain"
+	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/identity"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/ports"
 )
 
@@ -469,7 +470,7 @@ func (s *Service) acceptConsentDecision(ctx context.Context, request domain.Cons
 	if err := validateAudienceSubset(request.RequestedAudience, decision.GrantedAudiences); err != nil {
 		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrUpstream, err)
 	}
-	claims := s.filterClaims(client, decision.Claims, decision.GrantedScopes)
+	claims := s.filterClaims(client, decision.Claims, session, decision.GrantedScopes)
 	redirect, err := s.consent.AcceptConsent(ctx, request.Challenge, ports.ConsentAcceptance{
 		GrantScopes:   append([]string(nil), decision.GrantedScopes...),
 		GrantAudience: append([]string(nil), decision.GrantedAudiences...),
@@ -480,11 +481,33 @@ func (s *Service) acceptConsentDecision(ctx context.Context, request domain.Cons
 	return s.hydraRedirect(redirect, err)
 }
 
-func (s *Service) filterClaims(client config.Client, claims domain.Claims, scopes []string) domain.Claims {
-	return domain.Claims{
-		IDToken:     filterClaimMap(claims.IDToken, client.AllowedIDTokenClaims, scopes),
-		AccessToken: filterClaimMap(claims.AccessToken, client.AllowedAccessTokenClaims, scopes),
+func (s *Service) filterClaims(client config.Client, claims domain.Claims, session domain.Session, scopes []string) domain.Claims {
+	identityClaims := s.cfg.OIDCIdentityClaimMappings.Derive(session, s.cfg.IsSecureEnvironment())
+	result := domain.Claims{
+		IDToken: filterClaimMap(
+			claims.IDToken,
+			client.AllowedIDTokenClaims,
+			scopes,
+			s.cfg.OIDCIdentityClaimMappings,
+		),
+		AccessToken: filterClaimMap(
+			claims.AccessToken,
+			client.AllowedAccessTokenClaims,
+			scopes,
+			s.cfg.OIDCIdentityClaimMappings,
+		),
 	}
+	result.IDToken = mergeClaims(result.IDToken, filterIdentityClaimMap(
+		identityClaims,
+		client.AllowedIDTokenClaims,
+		scopes,
+	))
+	result.AccessToken = mergeClaims(result.AccessToken, filterIdentityClaimMap(
+		identityClaims,
+		client.AllowedAccessTokenClaims,
+		scopes,
+	))
+	return result
 }
 
 func (s *Service) rejectLogin(ctx context.Context, challenge, code, description string) (RedirectResult, error) {
@@ -596,6 +619,7 @@ func validateRequestedSubset(requested, granted []string) error {
 	return nil
 }
 
+// validateAudienceSubset validates that each granted audience was requested and that no audience is granted more than once.
 func validateAudienceSubset(requested, granted []string) error {
 	if hasDuplicates(granted) {
 		return domain.ErrInvalidAudience
@@ -608,12 +632,20 @@ func validateAudienceSubset(requested, granted []string) error {
 	return nil
 }
 
-func filterClaimMap(source map[string]any, allowed map[string][]string, scopes []string) map[string]any {
+// filterClaimMap selects allowed claims whose required scopes are granted, excluding reserved and identity-mapped claims.
+// It returns nil when no claims qualify.
+func filterClaimMap(source map[string]any, allowed map[string][]string, scopes []string, identityMappings identity.ClaimMappings) map[string]any {
 	if len(source) == 0 || len(allowed) == 0 {
 		return nil
 	}
 	result := make(map[string]any)
 	for name, value := range source {
+		if identity.IsReservedClaim(name) {
+			continue
+		}
+		if _, identityMappingExists := identityMappings[name]; identityMappingExists {
+			continue
+		}
 		requiredScopes, ok := allowed[name]
 		if ok && subset(requiredScopes, scopes) {
 			result[name] = value
@@ -625,6 +657,40 @@ func filterClaimMap(source map[string]any, allowed map[string][]string, scopes [
 	return result
 }
 
+// filterIdentityClaimMap filters identity claims to those allowed for the client and supported by the granted scopes.
+func filterIdentityClaimMap(source map[string]any, allowed map[string][]string, scopes []string) map[string]any {
+	if len(source) == 0 || len(allowed) == 0 {
+		return nil
+	}
+	result := make(map[string]any)
+	for name, value := range source {
+		requiredScopes, ok := allowed[name]
+		if !ok || !subset(requiredScopes, scopes) || !subset(identity.RequiredScopes(name), scopes) {
+			continue
+		}
+		result[name] = value
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// mergeClaims combines overlay claims into base, replacing values for duplicate claim names.
+func mergeClaims(base, overlay map[string]any) map[string]any {
+	if len(overlay) == 0 {
+		return base
+	}
+	if base == nil {
+		base = make(map[string]any, len(overlay))
+	}
+	for name, value := range overlay {
+		base[name] = value
+	}
+	return base
+}
+
+// subset reports whether every value in required is present in values.
 func subset(required, values []string) bool {
 	for _, value := range required {
 		if !contains(values, value) {

@@ -68,7 +68,10 @@ An allowed consent response contains explicit effective grants:
 
 Denied responses must contain `allowed: false` and empty grants. Claims are
 optional for allowed responses and are always filtered through the configured
-client claim allowlists before reaching Hydra.
+client claim allowlists before reaching Hydra. The provider derives optional
+identity claims locally from the validated Kratos session after this policy
+decision is allowed; identity source data and mappings are never sent to the
+policy service.
 
 The provider rejects a response when:
 
@@ -105,3 +108,19 @@ versioned endpoint and `POLICY_AUTH_TOKEN` is required outside development and
 test. The HTTP backend does not read `ALLOWED_SUBJECT_SCOPES`; local client,
 redirect, scope, audience, and claim allowlists still apply before and after the
 remote decision.
+
+## Identity Claims And Scopes
+
+Identity claim mappings are configured with `OIDC_IDENTITY_CLAIM_MAPPINGS`, not
+in this response. They can read only sanitized Kratos `traits` and
+`metadata_public` values through exact RFC 6901 JSON Pointers. `email` and
+`email_verified` require the `email` scope, while profile claims such as
+`name`, `given_name`, `family_name`, and `picture` require `profile`. The
+corresponding client token allowlist is still required, and access-token
+identity claims remain opt-in.
+
+Configured identity mapping names are authoritative: same-name policy claims
+are suppressed so a policy response cannot replace a validated identity value.
+Protocol-owned claims such as `sub`, `iss`, `aud`, `exp`, `iat`, `nbf`, `nonce`,
+`acr`, `amr`, and `azp` are rejected from both mapping and client policy
+allowlist configuration. Hydra remains responsible for protocol claims.

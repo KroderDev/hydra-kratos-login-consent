@@ -59,7 +59,7 @@ without verification.
 - Client, redirect URI, and scope policy.
 - Browser-bound login, consent, and logout handoffs.
 - Application-specific authorization policy integration.
-- Token claim construction.
+- Application policy claim filtering and opt-in OIDC identity claim construction.
 
 ## Go Structure
 
@@ -121,3 +121,15 @@ is configured; it does not probe the remote policy endpoint.
 For the complete runtime contract, including HTTPS, browser transactions,
 secret redaction, image verification, and a Kubernetes example, see
 [deployment.md](deployment.md).
+
+## Identity Claim Boundary
+
+The Kratos adapter retains only the identity's JSON `traits` and
+`metadata_public` objects in the transient `domain.Session`. It does not retain
+the full identity response, admin metadata, credentials, or browser
+credentials, and neither identity object is added to `domain.Transaction` or
+Redis. After consent policy approval, the core applies the configured exact RFC
+6901 mappings and standard OIDC scope/type checks. The resulting claims are
+then filtered independently for ID tokens and access tokens using the client's
+existing allowlists. No identity claim is copied to an access token without an
+explicit access-token allowlist entry.

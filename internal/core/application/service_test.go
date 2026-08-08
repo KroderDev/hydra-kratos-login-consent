@@ -12,6 +12,7 @@ import (
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/adapters/outbound/state"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/config"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/domain"
+	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/identity"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/ports"
 )
 
@@ -340,6 +341,246 @@ func TestService_ConsentReducesScopesAndFiltersClaims(t *testing.T) {
 		!reflect.DeepEqual(policy.consentInput.RequestedAudiences, []string{"api"}) ||
 		policy.consentInput.AAL != "aal2" || !reflect.DeepEqual(policy.consentInput.AMR, []string{"pwd", "totp"}) {
 		t.Fatalf("consent policy input = %#v", policy.consentInput)
+	}
+}
+
+func TestService_DerivesIdentityClaimsAfterPolicyApproval(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, kratos, policy, _ := newTestService(t)
+	client := service.cfg.Clients["example-client"]
+	client.AllowedScopes = []string{"openid", "profile", "email"}
+	client.AllowedIDTokenClaims = map[string][]string{
+		"email":          nil,
+		"email_verified": {"email"},
+		"name":           {"profile"},
+		"picture":        {"profile"},
+	}
+	client.AllowedAccessTokenClaims = map[string][]string{"api_role": {"openid"}, "name": {"profile"}}
+	service.cfg.Clients["example-client"] = client
+	service.cfg.OIDCIdentityClaimMappings = identity.ClaimMappings{
+		"email": {
+			Source: "/traits/email",
+			Type:   "string",
+			Format: "email",
+		},
+		"email_verified": {
+			Source: "/traits/email_verified",
+			Type:   "boolean",
+		},
+		"name": {
+			Sources:   []string{"/traits/name/given", "/traits/name/family"},
+			Transform: identity.TransformJoinSpace,
+			Type:      "string",
+		},
+		"picture": {
+			Source: "/metadata_public/picture",
+			Type:   "string",
+			Format: "uri",
+		},
+	}
+	hydra.consent = domain.ConsentRequest{
+		Challenge:       "consent-challenge",
+		Client:          testClient(),
+		Subject:         "operator-1",
+		RequestedScopes: []string{"openid", "profile", "email"},
+	}
+	kratos.session = domain.Session{
+		Subject: "operator-1",
+		AAL:     "aal2",
+		IdentityTraits: map[string]any{
+			"email": "identity@example.com",
+			"name":  map[string]any{"given": "Identity", "family": "User"},
+		},
+		IdentityMetadataPublic: map[string]any{"picture": "https://images.example/avatar.png"},
+	}
+	policy.consentDecision = ports.ConsentDecision{
+		Allowed:       true,
+		GrantedScopes: []string{"openid", "profile", "email"},
+		Claims:        domain.Claims{IDToken: map[string]any{"email": "policy@example.com", "name": "policy name"}, AccessToken: map[string]any{"api_role": "reader"}},
+	}
+
+	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
+	if err != nil {
+		t.Fatalf("start consent: %v", err)
+	}
+	_, err = service.CompleteConsent(context.Background(), ConsentInput{
+		Transaction:  transactionFromRedirect(t, started.URL),
+		CSRFToken:    queryValue(t, started.URL, "csrf"),
+		BrowserState: started.BrowserState,
+		Decision:     "accept",
+		GrantScopes:  []string{"openid", "profile", "email"},
+		Credentials:  ports.SessionCredentials{CookieValue: "opaque-session"},
+	})
+	if err != nil {
+		t.Fatalf("complete consent: %v", err)
+	}
+	idToken := hydra.consentAcceptance.Session.IDToken
+	if idToken["email"] != "identity@example.com" || idToken["name"] != "Identity User" {
+		t.Fatalf("identity claims = %#v, want mapped values to win over policy", idToken)
+	}
+	if idToken["picture"] != "https://images.example/avatar.png" {
+		t.Fatalf("picture claim = %#v, want mapped HTTPS URL", idToken["picture"])
+	}
+	if _, ok := idToken["email_verified"]; ok {
+		t.Fatal("email_verified was inferred without a mapped source")
+	}
+	if got := hydra.consentAcceptance.Session.AccessToken["api_role"]; got != "reader" {
+		t.Fatalf("policy access claim = %#v, want reader", got)
+	}
+	if got := hydra.consentAcceptance.Session.AccessToken["name"]; got != "Identity User" {
+		t.Fatalf("explicitly allowlisted identity access claim = %#v, want Identity User", got)
+	}
+	if _, ok := hydra.consentAcceptance.Session.AccessToken["email"]; ok {
+		t.Fatal("identity email was copied to the access token without an allowlist entry")
+	}
+}
+
+func TestService_IdentityClaimsRequireEffectiveStandardScopes(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, kratos, policy, _ := newTestService(t)
+	client := service.cfg.Clients["example-client"]
+	client.AllowedScopes = []string{"openid", "profile", "email"}
+	client.AllowedIDTokenClaims = map[string][]string{"email": nil, "name": nil}
+	service.cfg.Clients["example-client"] = client
+	service.cfg.OIDCIdentityClaimMappings = identity.ClaimMappings{
+		"email": {Source: "/traits/email", Type: "string", Format: "email"},
+		"name":  {Source: "/traits/name", Type: "string"},
+	}
+	hydra.consent = domain.ConsentRequest{
+		Challenge:       "consent-challenge",
+		Client:          testClient(),
+		Subject:         "operator-1",
+		RequestedScopes: []string{"openid", "profile", "email"},
+	}
+	kratos.session = domain.Session{
+		Subject:        "operator-1",
+		AAL:            "aal2",
+		IdentityTraits: map[string]any{"email": "operator@example.com", "name": "Operator"},
+	}
+	policy.consentDecision = ports.ConsentDecision{
+		Allowed:       true,
+		GrantedScopes: []string{"openid"},
+	}
+	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
+	if err != nil {
+		t.Fatalf("start consent: %v", err)
+	}
+	if _, err := service.CompleteConsent(context.Background(), ConsentInput{
+		Transaction: transactionFromRedirect(t, started.URL),
+		CSRFToken:   queryValue(t, started.URL, "csrf"), BrowserState: started.BrowserState,
+		Decision: "accept", GrantScopes: []string{"openid"},
+		Credentials: ports.SessionCredentials{CookieValue: "opaque-session"},
+	}); err != nil {
+		t.Fatalf("complete consent: %v", err)
+	}
+	if len(hydra.consentAcceptance.Session.IDToken) != 0 {
+		t.Fatalf("claims = %#v, want no email/profile claims without their scopes", hydra.consentAcceptance.Session.IDToken)
+	}
+}
+
+func TestService_DoesNotDeriveIdentityClaimsWhenPolicyDenies(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, kratos, policy, _ := newTestService(t)
+	client := service.cfg.Clients["example-client"]
+	client.AllowedScopes = []string{"openid", "email"}
+	client.AllowedIDTokenClaims = map[string][]string{"email": nil}
+	service.cfg.Clients["example-client"] = client
+	service.cfg.OIDCIdentityClaimMappings = identity.ClaimMappings{
+		"email": {Source: "/traits/email", Type: "string", Format: "email"},
+	}
+	hydra.consent = domain.ConsentRequest{
+		Challenge:       "consent-challenge",
+		Client:          testClient(),
+		Subject:         "operator-1",
+		RequestedScopes: []string{"openid", "email"},
+	}
+	kratos.session = domain.Session{
+		Subject:        "operator-1",
+		AAL:            "aal2",
+		IdentityTraits: map[string]any{"email": "operator@example.com"},
+	}
+	policy.consentDecision = ports.ConsentDecision{Allowed: false}
+	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
+	if err != nil {
+		t.Fatalf("start consent: %v", err)
+	}
+	if _, err := service.CompleteConsent(context.Background(), ConsentInput{
+		Transaction: transactionFromRedirect(t, started.URL),
+		CSRFToken:   queryValue(t, started.URL, "csrf"), BrowserState: started.BrowserState,
+		Decision: "accept", GrantScopes: []string{"openid", "email"},
+		Credentials: ports.SessionCredentials{CookieValue: "opaque-session"},
+	}); err != nil {
+		t.Fatalf("complete denied consent: %v", err)
+	}
+	if hydra.consentAcceptance.Session.IDToken != nil {
+		t.Fatalf("denied consent accepted claims: %#v", hydra.consentAcceptance.Session)
+	}
+}
+
+func TestService_FilterClaimMapFiltersReservedAndMappedClaims(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, kratos, policy, _ := newTestService(t)
+	client := service.cfg.Clients["example-client"]
+	client.AllowedScopes = []string{"openid", "profile"}
+	client.AllowedIDTokenClaims = map[string][]string{"sub": nil, "role": nil, "email": nil, "custom": nil}
+	service.cfg.Clients["example-client"] = client
+	service.cfg.OIDCIdentityClaimMappings = identity.ClaimMappings{
+		"email": {Source: "/traits/email", Type: "string", Format: "email"},
+	}
+	hydra.consent = domain.ConsentRequest{
+		Challenge:       "consent-challenge",
+		Client:          testClient(),
+		Subject:         "operator-1",
+		RequestedScopes: []string{"openid", "profile"},
+	}
+	kratos.session = domain.Session{
+		Subject:        "operator-1",
+		AAL:            "aal2",
+		IdentityTraits: map[string]any{"email": "identity@example.com"},
+	}
+	policy.consentDecision = ports.ConsentDecision{
+		Allowed:       true,
+		GrantedScopes: []string{"openid", "profile"},
+		Claims: domain.Claims{
+			IDToken: map[string]any{
+				"sub":    "should-be-filtered",
+				"role":   "operator",
+				"email":  "policy@example.com",
+				"custom": "custom-value",
+			},
+		},
+	}
+	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
+	if err != nil {
+		t.Fatalf("start consent: %v", err)
+	}
+	_, err = service.CompleteConsent(context.Background(), ConsentInput{
+		Transaction:  transactionFromRedirect(t, started.URL),
+		CSRFToken:    queryValue(t, started.URL, "csrf"),
+		BrowserState: started.BrowserState,
+		Decision:     "accept",
+		GrantScopes:  []string{"openid", "profile"},
+		Credentials:  ports.SessionCredentials{CookieValue: "opaque-session"},
+	})
+	if err != nil {
+		t.Fatalf("complete consent: %v", err)
+	}
+	idToken := hydra.consentAcceptance.Session.IDToken
+	if _, ok := idToken["sub"]; ok {
+		t.Fatal("reserved claim sub was not filtered from policy claims")
+	}
+	if _, ok := idToken["email"]; ok {
+		t.Fatal("identity-mapped policy claim email was not filtered")
+	}
+	if idToken["role"] != "operator" {
+		t.Fatalf("allowed non-reserved policy claim = %#v, want operator", idToken["role"])
+	}
+	if idToken["custom"] != "custom-value" {
+		t.Fatalf("non-allowlisted policy claim = %#v, want custom-value", idToken["custom"])
 	}
 }
 

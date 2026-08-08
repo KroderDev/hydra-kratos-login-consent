@@ -23,6 +23,9 @@ func TestLoadDefaultsAndClientIDs(t *testing.T) {
 	if cfg.PolicyBackend != PolicyBackendStatic || cfg.PolicyURL != nil {
 		t.Fatalf("policy config = %#v, want static defaults", cfg)
 	}
+	if len(cfg.OIDCIdentityClaimMappings) != 0 {
+		t.Fatalf("identity claim mappings = %#v, want disabled by default", cfg.OIDCIdentityClaimMappings)
+	}
 	client, ok := cfg.Clients["example-client"]
 	if !ok || client.ID != "example-client" {
 		t.Fatalf("client = %#v, want client ID populated from map key", client)
@@ -64,6 +67,21 @@ func TestLoadParsesConfiguredValues(t *testing.T) {
 	}
 	if cfg.ListenAddress != "127.0.0.1:9090" || cfg.Environment != "test" || cfg.TransactionTTL != 30*time.Second || cfg.MaxPendingTransactions != 17 || cfg.RequiredAAL != "aal1" || cfg.KratosSessionCookie != "custom_session" {
 		t.Fatalf("parsed config = %#v", cfg)
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestLoadParsesOIDCIdentityClaimMappings(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("OIDC_IDENTITY_CLAIM_MAPPINGS", `{"email":{"sources":["/traits/email"],"type":"string","format":"email"}}`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	mapping, ok := cfg.OIDCIdentityClaimMappings["email"]
+	if !ok || len(mapping.Sources) != 1 || mapping.Sources[0] != "/traits/email" || mapping.Type != "string" || mapping.Format != "email" {
+		t.Fatalf("identity claim mappings = %#v, want parsed email mapping", cfg.OIDCIdentityClaimMappings)
 	}
 }
 
@@ -118,6 +136,8 @@ func TestLoadRejectsMalformedConfiguredValues(t *testing.T) {
 		//nolint:gosec // Credential-shaped input is intentional malformed configuration coverage.
 		{name: "policy URL credentials", key: "POLICY_URL", value: "https://user:" + "pw" + "@policy.example/v1/authorize"},
 		{name: "policy URL fragment", key: "POLICY_URL", value: "https://policy.example/v1/authorize#fragment"},
+		{name: "identity mapping pointer", key: "OIDC_IDENTITY_CLAIM_MAPPINGS", value: `{"email":{"sources":["traits/email"],"type":"string","format":"email"}}`},
+		{name: "identity reserved claim", key: "OIDC_IDENTITY_CLAIM_MAPPINGS", value: `{"sub":{"sources":["/traits/id"],"type":"string"}}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -146,4 +166,5 @@ func setRequiredEnvironment(t *testing.T) {
 	t.Setenv("POLICY_BACKEND", "")
 	t.Setenv("POLICY_URL", "")
 	t.Setenv("POLICY_AUTH_TOKEN", "")
+	t.Setenv("OIDC_IDENTITY_CLAIM_MAPPINGS", "")
 }

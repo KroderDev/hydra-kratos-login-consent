@@ -54,11 +54,15 @@ type LogoutRequest struct {
 	PostLogoutRedirectURI string
 }
 
-// Session is the server-validated Kratos session identity and assurance.
+// Session is the server-validated Kratos session identity and assurance. The
+// identity maps contain only sanitized traits and public metadata and are
+// transient; they are not transaction state.
 type Session struct {
-	Subject string
-	AAL     string
-	AMR     []string
+	Subject                string
+	AAL                    string
+	AMR                    []string
+	IdentityTraits         map[string]any
+	IdentityMetadataPublic map[string]any
 }
 
 // Claims contains claims that may be passed to Hydra token sessions.

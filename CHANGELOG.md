@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.3.3...v0.4.0) (2026-08-08)
+
+
+### Features
+
+* **claims:** add configurable OIDC identity mappings ([c1c6049](https://github.com/KroderDev/hydra-kratos-login-consent/commit/c1c6049aa85df28e9bf3b18dab40e3028b16e4d5))
+* **claims:** add configurable OIDC identity mappings ([58da547](https://github.com/KroderDev/hydra-kratos-login-consent/commit/58da5475675f358efdfa5224752020a72aff96be))
+
+
+### Bug Fixes
+
+* **claims:** restrict uri/url format to HTTP(S) and expand coverage ([a18bb83](https://github.com/KroderDev/hydra-kratos-login-consent/commit/a18bb835e65af0b44029b6d48c9eeea52b4ef401))
+
 ## [0.3.3](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.3.2...v0.3.3) (2026-08-07)
 
 

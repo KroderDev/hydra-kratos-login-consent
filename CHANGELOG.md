@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.1](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.4.0...v0.4.1) (2026-08-13)
+
+
+### Dependencies
+
+* **deps:** bump actions/labeler from 6 to 7 ([a74a738](https://github.com/KroderDev/hydra-kratos-login-consent/commit/a74a738cab40096abdbd61124605245c57e9ee8b))
+* **deps:** bump redis in the compose-non-major group ([68b0707](https://github.com/KroderDev/hydra-kratos-login-consent/commit/68b0707cd2fc12036f5bf2114ba255aabd1c13c5))
+* **deps:** bump the actions-non-major group with 2 updates ([e25aed4](https://github.com/KroderDev/hydra-kratos-login-consent/commit/e25aed4cadf83937fa0e2f4cc8bb35aa2dca47b8))
+
 ## [0.4.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.3.3...v0.4.0) (2026-08-08)
 
 

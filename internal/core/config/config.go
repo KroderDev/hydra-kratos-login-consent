@@ -256,6 +256,9 @@ func validateURL(value *url.URL, name string, requireHTTPS bool) error {
 	return nil
 }
 
+// validateAbsoluteURL validates an absolute HTTP(S) URL and optionally requires HTTPS,
+// while allowing HTTP URLs targeting loopback addresses when HTTPS is required.
+// It returns an error for invalid URLs or URLs that do not meet the transport requirement.
 func validateAbsoluteURL(value string, requireHTTPS bool) error {
 	parsed, err := url.Parse(value)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
@@ -267,6 +270,7 @@ func validateAbsoluteURL(value string, requireHTTPS bool) error {
 	return nil
 }
 
+// isLoopbackHTTPURL reports whether value uses HTTP and targets the loopback address 127.0.0.1 or ::1.
 func isLoopbackHTTPURL(value *url.URL) bool {
 	if value.Scheme != "http" {
 		return false
@@ -279,6 +283,7 @@ func isLoopbackHTTPURL(value *url.URL) bool {
 	}
 }
 
+// hasDuplicates reports whether the slice contains any repeated string.
 func hasDuplicates(values []string) bool {
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.3](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.4.2...v0.4.3) (2026-08-16)
+
+
+### Bug Fixes
+
+* **security:** isolate HTTPS browser state cookies ([98fb1f7](https://github.com/KroderDev/hydra-kratos-login-consent/commit/98fb1f76bcaffa56e904ea8b7d5781eee783c749))
+* **security:** isolate HTTPS browser state cookies ([643f23c](https://github.com/KroderDev/hydra-kratos-login-consent/commit/643f23c46bf8a7b6c0fe7976f2def1df5860eabf))
+
+
+### Tests
+
+* **security:** cover HTTP browser state cookie fallback ([2c706f2](https://github.com/KroderDev/hydra-kratos-login-consent/commit/2c706f2c91c12672ae45900fee3a35cdf1009b3b))
+
 ## [0.4.2](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.4.1...v0.4.2) (2026-08-16)
 
 

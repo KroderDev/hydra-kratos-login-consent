@@ -145,6 +145,44 @@ func TestConfigValidateRequiresHTTPSOutsideDevelopment(t *testing.T) {
 	}
 }
 
+func TestConfigValidateAllowsLoopbackHTTPClientURLsOutsideDevelopment(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t)
+	cfg.Environment = "production"
+	client := cfg.Clients["example-client"]
+	client.AllowedRedirectURIs = []string{"http://localhost:3000/callback"}
+	client.AllowedPostLogoutRedirects = []string{"http://[::1]:3000/"}
+	cfg.Clients["example-client"] = client
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate rejected loopback HTTP client URLs: %v", err)
+	}
+}
+
+func TestConfigValidateRejectsNonLoopbackHTTPClientURLsOutsideDevelopment(t *testing.T) {
+	t.Parallel()
+
+	for _, uri := range []string{
+		"http://client.example/callback",
+		"http://127.0.0.2:3000/callback",
+		"http://localhost.example/callback",
+	} {
+		t.Run(uri, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig(t)
+			cfg.Environment = "production"
+			client := cfg.Clients["example-client"]
+			client.AllowedRedirectURIs = []string{uri}
+			cfg.Clients["example-client"] = client
+
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("Validate accepted a non-loopback HTTP client URL")
+			}
+		})
+	}
+}
+
 func TestConfigValidateRejectsLongTransactionTTL(t *testing.T) {
 	t.Parallel()
 

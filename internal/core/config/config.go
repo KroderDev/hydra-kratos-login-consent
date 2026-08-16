@@ -261,10 +261,22 @@ func validateAbsoluteURL(value string, requireHTTPS bool) error {
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return fmt.Errorf("invalid absolute URL %q", value)
 	}
-	if requireHTTPS && parsed.Scheme != "https" {
+	if requireHTTPS && parsed.Scheme != "https" && !isLoopbackHTTPURL(parsed) {
 		return fmt.Errorf("invalid non-https URL %q outside development and test", value)
 	}
 	return nil
+}
+
+func isLoopbackHTTPURL(value *url.URL) bool {
+	if value.Scheme != "http" {
+		return false
+	}
+	switch strings.ToLower(value.Hostname()) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }
 
 func hasDuplicates(values []string) bool {

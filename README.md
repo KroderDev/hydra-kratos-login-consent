@@ -163,9 +163,11 @@ docker build --tag hydra-kratos-login-consent:local .
 The image runs as a non-root user and contains only the compiled server and
 runtime certificates. Configuration and secrets must be supplied at runtime;
 they are not copied into the image. For a production deployment, set
-`ENVIRONMENT=production`, use HTTPS URLs, set `STATE_STORE=redis` with a
-`rediss://` `REDIS_URL`, and provide the required Hydra, Kratos, UI, client,
-and policy configuration.
+`ENVIRONMENT=production`, use HTTPS for provider, UI, and upstream URLs, set
+`STATE_STORE=redis` with a `rediss://` `REDIS_URL`, and provide the required
+Hydra, Kratos, UI, client, and policy configuration. Native clients may use
+explicitly allowlisted loopback IP-literal redirects over HTTP only when using
+authorization-code PKCE with `S256`.
 
 The container listens on port `8080` by default. Its Docker healthcheck calls
 `/healthz`; orchestration readiness probes should call `/readyz`. Readiness

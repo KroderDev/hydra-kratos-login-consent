@@ -271,8 +271,10 @@ func isLoopbackHTTPURL(value *url.URL) bool {
 	if value.Scheme != "http" {
 		return false
 	}
-	switch strings.ToLower(value.Hostname()) {
-	case "localhost", "127.0.0.1", "::1":
+	// Native-app loopback redirects use IP literals so hostname resolution
+	// cannot move the authorization response off the loopback interface.
+	switch value.Hostname() {
+	case "127.0.0.1", "::1":
 		return true
 	default:
 		return false

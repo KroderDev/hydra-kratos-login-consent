@@ -11,9 +11,11 @@ example, not a production secret store.
 `production` for a production deployment and use a distinct value for each
 non-production environment.
 
-Secure environments require HTTPS for the configured HTTP URLs, require the
-Redis TLS scheme, reject the in-memory transaction store, and require the
-server-side credentials and policy settings described below.
+Secure environments require HTTPS for configured provider, UI, Hydra, Kratos,
+and policy URLs, require the Redis TLS scheme, reject the in-memory transaction
+store, and require the server-side credentials and policy settings described
+below. Client redirect and post-logout URLs also require HTTPS except for the
+explicitly allowlisted native-app loopback IP literals described below.
 
 ## Variables
 
@@ -53,6 +55,15 @@ exactly `development` or `test` after trimming and lowercasing.
 `ALLOWED_CLIENTS` is a JSON object keyed by OAuth client ID. The map key is the
 authoritative ID; an optional `id` property must match it. A configured client
 must contain at least one `allowed_redirect_uris` value.
+
+In secure environments, client redirect and post-logout URLs must use HTTPS.
+The only exception is an explicitly configured native-app loopback IP literal,
+such as `http://127.0.0.1:51004/oauth2redirect` or
+`http://[::1]:61023/oauth2redirect`. `localhost` and all other hostnames are
+rejected. These public clients must use the authorization-code flow with PKCE
+using the `S256` challenge method, bind only to the loopback interface, and
+prefer an ephemeral listening port. The complete URI remains an exact
+allowlist entry; the exception is not a redirect wildcard.
 
 The following is a generic shape. Values are examples, not credentials:
 

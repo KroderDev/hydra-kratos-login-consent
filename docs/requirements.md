@@ -122,9 +122,14 @@ may use a particular OAuth client and scope set.
 
 ## Security Requirements
 
-- All browser-facing and upstream HTTP traffic MUST use TLS outside local
-  development. If TLS terminates before the process, the deployment MUST
-  protect the private hop to the process.
+- All provider/UI browser-facing and upstream HTTP traffic MUST use TLS outside
+  local development. Explicitly allowlisted native-client loopback IP-literal
+  redirect URIs (`127.0.0.1` or `[::1]`) are the only OAuth redirect exception;
+  this exception MUST NOT apply to provider or upstream URLs. If TLS terminates
+  before the process, the deployment MUST protect the private hop to the
+  process.
+- Public native clients using loopback redirects MUST use the authorization-code
+  flow with PKCE and the `S256` challenge method.
 - Hydra admin and Kratos admin endpoints MUST be private.
 - OAuth client IDs, redirect URIs, and scopes MUST be allowlisted.
 - State, nonce, and transaction values MUST be unpredictable and single-use.

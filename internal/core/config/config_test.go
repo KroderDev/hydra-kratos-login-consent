@@ -151,12 +151,39 @@ func TestConfigValidateAllowsLoopbackHTTPClientURLsOutsideDevelopment(t *testing
 	cfg := validConfig(t)
 	cfg.Environment = "production"
 	client := cfg.Clients["example-client"]
-	client.AllowedRedirectURIs = []string{"http://localhost:3000/callback"}
+	client.AllowedRedirectURIs = []string{"http://127.0.0.1:3000/callback"}
 	client.AllowedPostLogoutRedirects = []string{"http://[::1]:3000/"}
 	cfg.Clients["example-client"] = client
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate rejected loopback HTTP client URLs: %v", err)
+	}
+}
+
+func TestIsLoopbackHTTPURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "IPv4 loopback", raw: "http://127.0.0.1:3000/callback", want: true},
+		{name: "IPv6 loopback", raw: "http://[::1]:3000/callback", want: true},
+		{name: "HTTPS loopback", raw: "https://127.0.0.1/callback", want: false},
+		{name: "non-loopback", raw: "http://127.0.0.2:3000/callback", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parsed, err := url.Parse(tt.raw)
+			if err != nil {
+				t.Fatalf("parse URL: %v", err)
+			}
+			if got := isLoopbackHTTPURL(parsed); got != tt.want {
+				t.Fatalf("isLoopbackHTTPURL(%q) = %t, want %t", tt.raw, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -166,6 +193,7 @@ func TestConfigValidateRejectsNonLoopbackHTTPClientURLsOutsideDevelopment(t *tes
 	for _, uri := range []string{
 		"http://client.example/callback",
 		"http://127.0.0.2:3000/callback",
+		"http://localhost:3000/callback",
 		"http://localhost.example/callback",
 	} {
 		t.Run(uri, func(t *testing.T) {

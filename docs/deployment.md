@@ -9,8 +9,8 @@ runtime may implement it. Kubernetes is shown only as one example.
 Production deployments must satisfy all of the following:
 
 - Use `ENVIRONMENT=production` or another secure environment value.
-- Serve every browser-facing URL over HTTPS. Configure `PUBLIC_URL` and
-  `EXTERNAL_UI_URL` with `https://` URLs.
+- Serve every provider and external-UI browser-facing URL over HTTPS. Configure
+  `PUBLIC_URL` and `EXTERNAL_UI_URL` with `https://` URLs.
 - Use HTTPS for server-to-server HTTP URLs: `HYDRA_ADMIN_URL`,
   `HYDRA_PUBLIC_URL`, `KRATOS_PUBLIC_URL`, and `POLICY_URL` when HTTP policy is
   selected.
@@ -26,6 +26,9 @@ Production deployments must satisfy all of the following:
 - Supply `HYDRA_ADMIN_TOKEN`, and the HTTP policy token when applicable, through
   a runtime secret mechanism.
 - Configure exact client, redirect URI, scope, audience, and claim allowlists.
+- For native clients using loopback redirects, allow only explicit
+  `http://127.0.0.1:<port>/...` or `http://[::1]:<port>/...` entries. Do not use
+  `localhost`; require authorization-code flow with PKCE using `S256`.
 
 The server listens for plain HTTP on `LISTEN_ADDR` (default `:8080`); it does
 not load TLS certificates itself. A deployment must provide a TLS-capable

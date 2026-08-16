@@ -145,6 +145,111 @@ func TestConfigValidateRequiresHTTPSOutsideDevelopment(t *testing.T) {
 	}
 }
 
+func TestConfigValidateAllowsLoopbackHTTPClientURLsOutsideDevelopment(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t)
+	cfg.Environment = "production"
+	client := cfg.Clients["example-client"]
+	client.AllowedRedirectURIs = []string{"http://127.0.0.1:3000/callback"}
+	client.AllowedPostLogoutRedirects = []string{"http://[::1]:3000/"}
+	cfg.Clients["example-client"] = client
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate rejected loopback HTTP client URLs: %v", err)
+	}
+}
+
+func TestIsLoopbackHTTPURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "IPv4 loopback", raw: "http://127.0.0.1:3000/callback", want: true},
+		{name: "IPv6 loopback", raw: "http://[::1]:3000/callback", want: true},
+		{name: "HTTPS loopback", raw: "https://127.0.0.1/callback", want: false},
+		{name: "non-loopback", raw: "http://127.0.0.2:3000/callback", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parsed, err := url.Parse(tt.raw)
+			if err != nil {
+				t.Fatalf("parse URL: %v", err)
+			}
+			if got := isLoopbackHTTPURL(parsed); got != tt.want {
+				t.Fatalf("isLoopbackHTTPURL(%q) = %t, want %t", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigValidateRejectsLoopbackHTTPForServiceURLsOutsideDevelopment(t *testing.T) {
+	t.Parallel()
+
+	apply := map[string]func(*Config, *url.URL){
+		"provider URL":    func(cfg *Config, value *url.URL) { cfg.ProviderURL = value },
+		"external UI URL": func(cfg *Config, value *url.URL) { cfg.ExternalUIURL = value },
+		"Hydra admin URL": func(cfg *Config, value *url.URL) {
+			cfg.HydraAdminURL = value
+		},
+		"Hydra public URL": func(cfg *Config, value *url.URL) {
+			cfg.HydraPublicURL = value
+		},
+		"Kratos public URL": func(cfg *Config, value *url.URL) {
+			cfg.KratosPublicURL = value
+		},
+		"policy URL": func(cfg *Config, value *url.URL) {
+			cfg.PolicyBackend = PolicyBackendHTTP
+			cfg.PolicyURL = value
+		},
+	}
+	for _, loopback := range []string{"http://127.0.0.1:8080", "http://[::1]:8080"} {
+		for name, mutate := range apply {
+			t.Run(name+" "+loopback, func(t *testing.T) {
+				t.Parallel()
+				cfg := validConfig(t)
+				cfg.Environment = "production"
+				parsed, err := url.Parse(loopback)
+				if err != nil {
+					t.Fatalf("parse URL: %v", err)
+				}
+				mutate(&cfg, parsed)
+				if err := cfg.Validate(); err == nil {
+					t.Fatal("Validate accepted loopback HTTP service URL outside development")
+				}
+			})
+		}
+	}
+}
+
+func TestConfigValidateRejectsNonLoopbackHTTPClientURLsOutsideDevelopment(t *testing.T) {
+	t.Parallel()
+
+	for _, uri := range []string{
+		"http://client.example/callback",
+		"http://127.0.0.2:3000/callback",
+		"http://localhost:3000/callback",
+		"http://localhost.example/callback",
+	} {
+		t.Run(uri, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig(t)
+			cfg.Environment = "production"
+			client := cfg.Clients["example-client"]
+			client.AllowedRedirectURIs = []string{uri}
+			cfg.Clients["example-client"] = client
+
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("Validate accepted a non-loopback HTTP client URL")
+			}
+		})
+	}
+}
+
 func TestConfigValidateRejectsLongTransactionTTL(t *testing.T) {
 	t.Parallel()
 

@@ -92,7 +92,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.service.StartLogin(r.Context(), challenge, ports.LoginStartInput{
-		BrowserState: browserStateCookie(r, loginBrowserStateCookie),
+		BrowserState: s.browserStateCookie(r, loginBrowserStateCookie),
 	})
 	if err != nil {
 		s.writeError(w, r, err)
@@ -120,7 +120,7 @@ func (s *Server) handleLoginCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.service.CompleteLogin(r.Context(), transaction, ports.LoginInput{
 		CSRFToken:    csrfToken,
-		BrowserState: browserStateCookie(r, loginBrowserStateCookie),
+		BrowserState: s.browserStateCookie(r, loginBrowserStateCookie),
 		Credentials:  s.sessionCredentials(r),
 		Remember:     remember,
 		RememberFor:  rememberFor,
@@ -139,7 +139,7 @@ func (s *Server) handleConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.service.StartConsent(r.Context(), challenge, ports.ConsentStartInput{
-		BrowserState: browserStateCookie(r, consentBrowserStateCookie),
+		BrowserState: s.browserStateCookie(r, consentBrowserStateCookie),
 	})
 	if err != nil {
 		s.writeError(w, r, err)
@@ -171,7 +171,7 @@ func (s *Server) handleConsentSubmit(w http.ResponseWriter, r *http.Request) {
 	result, err := s.service.CompleteConsent(r.Context(), ports.ConsentInput{
 		Transaction:  transaction,
 		CSRFToken:    csrfToken,
-		BrowserState: browserStateCookie(r, consentBrowserStateCookie),
+		BrowserState: s.browserStateCookie(r, consentBrowserStateCookie),
 		Decision:     decision,
 		GrantScopes:  grantScopes,
 		Credentials:  s.sessionCredentials(r),
@@ -192,7 +192,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.service.StartLogout(r.Context(), challenge, ports.LogoutStartInput{
-		BrowserState: browserStateCookie(r, logoutBrowserStateCookie),
+		BrowserState: s.browserStateCookie(r, logoutBrowserStateCookie),
 	})
 	if err != nil {
 		s.writeError(w, r, err)
@@ -215,7 +215,7 @@ func (s *Server) handleLogoutSubmit(w http.ResponseWriter, r *http.Request) {
 	result, err := s.service.CompleteLogout(r.Context(), ports.LogoutInput{
 		Transaction:  strings.TrimSpace(r.Form.Get("transaction")),
 		CSRFToken:    strings.TrimSpace(r.Form.Get("csrf")),
-		BrowserState: browserStateCookie(r, logoutBrowserStateCookie),
+		BrowserState: s.browserStateCookie(r, logoutBrowserStateCookie),
 	})
 	if err != nil {
 		s.writeError(w, r, err)
@@ -463,10 +463,15 @@ func browserStateCookie(r *http.Request, name string) string {
 	return cookie.Value
 }
 
+func (s *Server) browserStateCookie(r *http.Request, name string) string {
+	return browserStateCookie(r, s.browserStateCookieName(name))
+}
+
 func (s *Server) setBrowserStateCookie(w http.ResponseWriter, name, value string) {
 	if value == "" {
 		return
 	}
+	name = s.browserStateCookieName(name)
 	sameSite := http.SameSiteLaxMode
 	secure := s.cfg.ProviderURL != nil && s.cfg.ProviderURL.Scheme == "https"
 	if secure {
@@ -481,6 +486,13 @@ func (s *Server) setBrowserStateCookie(w http.ResponseWriter, name, value string
 		Secure:   secure,
 		SameSite: sameSite,
 	})
+}
+
+func (s *Server) browserStateCookieName(name string) string {
+	if s.cfg.ProviderURL != nil && s.cfg.ProviderURL.Scheme == "https" {
+		return "__Host-" + name
+	}
+	return name
 }
 
 func newRequestID() (string, error) {

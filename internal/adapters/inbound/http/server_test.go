@@ -401,6 +401,45 @@ func TestSetBrowserStateCookieUsesSecureAttributesForHTTPS(t *testing.T) {
 	if !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteNoneMode || cookie.Path != "/" {
 		t.Fatalf("cookie attributes = %#v", cookie)
 	}
+	if cookie.Name != "__Host-state" || cookie.Domain != "" {
+		t.Fatalf("cookie scope = %q/%q, want __Host-state/host-only", cookie.Name, cookie.Domain)
+	}
+}
+
+func TestBrowserStateCookieIgnoresLegacyNameForHTTPS(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{cfg: testConfig()}
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/login/callback", nil)
+	request.AddCookie(&http.Cookie{
+		Name: loginBrowserStateCookie, Value: "legacy", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+	})
+	request.AddCookie(&http.Cookie{
+		Name: "__Host-" + loginBrowserStateCookie, Value: "current", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+	})
+
+	if got := server.browserStateCookie(request, loginBrowserStateCookie); got != "current" {
+		t.Fatalf("browser state cookie = %q, want current prefixed cookie", got)
+	}
+}
+
+func TestSetBrowserStateCookieKeepsPlainNameForHTTP(t *testing.T) {
+	t.Parallel()
+
+	providerURL, _ := url.Parse("http://provider.example")
+	cfg := testConfig()
+	cfg.ProviderURL = providerURL
+	server := &Server{cfg: cfg}
+	recorder := httptest.NewRecorder()
+	server.setBrowserStateCookie(recorder, "state", "opaque-state")
+	cookies := recorder.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cookies = %d, want 1", len(cookies))
+	}
+	cookie := cookies[0]
+	if cookie.Name != "state" || cookie.Secure || cookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("cookie = %#v, want plain non-secure name with Lax SameSite", cookie)
+	}
 }
 
 func newTestHandler(t *testing.T) (http.Handler, *fakeHydra, *fakeKratos, *fakePolicy) {

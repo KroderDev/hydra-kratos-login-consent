@@ -401,6 +401,26 @@ func TestSetBrowserStateCookieUsesSecureAttributesForHTTPS(t *testing.T) {
 	if !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteNoneMode || cookie.Path != "/" {
 		t.Fatalf("cookie attributes = %#v", cookie)
 	}
+	if cookie.Name != "__Host-state" || cookie.Domain != "" {
+		t.Fatalf("cookie scope = %q/%q, want __Host-state/host-only", cookie.Name, cookie.Domain)
+	}
+}
+
+func TestBrowserStateCookieIgnoresLegacyNameForHTTPS(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{cfg: testConfig()}
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/login/callback", nil)
+	request.AddCookie(&http.Cookie{
+		Name: loginBrowserStateCookie, Value: "legacy", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+	})
+	request.AddCookie(&http.Cookie{
+		Name: "__Host-" + loginBrowserStateCookie, Value: "current", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+	})
+
+	if got := server.browserStateCookie(request, loginBrowserStateCookie); got != "current" {
+		t.Fatalf("browser state cookie = %q, want current prefixed cookie", got)
+	}
 }
 
 func newTestHandler(t *testing.T) (http.Handler, *fakeHydra, *fakeKratos, *fakePolicy) {

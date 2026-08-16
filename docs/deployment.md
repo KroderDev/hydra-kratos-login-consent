@@ -49,8 +49,9 @@ server-side handoff between Hydra and the external Kratos UI:
 3. The provider creates a short-lived, single-use transaction in Redis/Valkey,
    binds it to a provider-issued HttpOnly browser-state cookie, and redirects
    the browser to the configured external UI. For an HTTPS provider URL, that
-   cookie is also `Secure` and `SameSite=None`; local HTTP development uses
-   `SameSite=Lax`.
+   cookie is also `Secure`, `SameSite=None`, and uses the `__Host-` prefix to
+   prevent parent-domain cookie collisions; local HTTP development uses the
+   unprefixed name and `SameSite=Lax`.
 4. The UI receives only `flow`, an opaque `transaction`, an opaque `csrf`, and a
    fixed `return_to` callback. Consent also receives safe display data such as
    `client_name`, `scope`, and an optional `skip_consent` hint. The Hydra

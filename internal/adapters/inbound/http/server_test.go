@@ -423,6 +423,25 @@ func TestBrowserStateCookieIgnoresLegacyNameForHTTPS(t *testing.T) {
 	}
 }
 
+func TestSetBrowserStateCookieKeepsPlainNameForHTTP(t *testing.T) {
+	t.Parallel()
+
+	providerURL, _ := url.Parse("http://provider.example")
+	cfg := testConfig()
+	cfg.ProviderURL = providerURL
+	server := &Server{cfg: cfg}
+	recorder := httptest.NewRecorder()
+	server.setBrowserStateCookie(recorder, "state", "opaque-state")
+	cookies := recorder.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cookies = %d, want 1", len(cookies))
+	}
+	cookie := cookies[0]
+	if cookie.Name != "state" || cookie.Secure || cookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("cookie = %#v, want plain non-secure name with Lax SameSite", cookie)
+	}
+}
+
 func newTestHandler(t *testing.T) (http.Handler, *fakeHydra, *fakeKratos, *fakePolicy) {
 	t.Helper()
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)

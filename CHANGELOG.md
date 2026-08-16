@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.2](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.4.1...v0.4.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **config:** allow loopback HTTP client redirects ([9874e6d](https://github.com/KroderDev/hydra-kratos-login-consent/commit/9874e6d6fc23ca7b86f7d04c181e97e7ad60b3c2))
+* **config:** allow loopback HTTP client redirects ([a92dc18](https://github.com/KroderDev/hydra-kratos-login-consent/commit/a92dc18c061125a1490e7db9ec1fa21fa77e01aa))
+* **config:** restrict loopback redirects to IP literals ([5444528](https://github.com/KroderDev/hydra-kratos-login-consent/commit/5444528c6889842d3c4d8cebf2c8bc62ecc33c87))
+* **config:** scope loopback HTTP exception to client redirects ([98a99ed](https://github.com/KroderDev/hydra-kratos-login-consent/commit/98a99ed1a334af35021dddfd8c678c12223114c5))
+
+
+### Tests
+
+* **config:** drop redundant comments in loopback helper ([1699f7a](https://github.com/KroderDev/hydra-kratos-login-consent/commit/1699f7a4eb652edb0808bc1d69c97992b8f578bd))
+
 ## [0.4.1](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.4.0...v0.4.1) (2026-08-13)
 
 

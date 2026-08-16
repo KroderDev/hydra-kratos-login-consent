@@ -115,7 +115,7 @@ func (c Config) Validate() error {
 			return fmt.Errorf("client %q has no allowed redirect uris", id)
 		}
 		for _, value := range append(append([]string{}, client.AllowedRedirectURIs...), client.AllowedPostLogoutRedirects...) {
-			if err := validateAbsoluteURL(value, secureTransport); err != nil {
+			if err := validateAbsoluteURL(value, secureTransport, true); err != nil {
 				return fmt.Errorf("client %q: %w", id, err)
 			}
 		}
@@ -257,14 +257,14 @@ func validateURL(value *url.URL, name string, requireHTTPS bool) error {
 }
 
 // validateAbsoluteURL validates an absolute HTTP(S) URL and optionally requires HTTPS,
-// while allowing HTTP URLs targeting loopback addresses when HTTPS is required.
+// while allowing HTTP URLs targeting loopback addresses when loopback redirects are enabled.
 // It returns an error for invalid URLs or URLs that do not meet the transport requirement.
-func validateAbsoluteURL(value string, requireHTTPS bool) error {
+func validateAbsoluteURL(value string, requireHTTPS, allowLoopbackHTTP bool) error {
 	parsed, err := url.Parse(value)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return fmt.Errorf("invalid absolute URL %q", value)
 	}
-	if requireHTTPS && parsed.Scheme != "https" && !isLoopbackHTTPURL(parsed) {
+	if requireHTTPS && parsed.Scheme != "https" && (!allowLoopbackHTTP || !isLoopbackHTTPURL(parsed)) {
 		return fmt.Errorf("invalid non-https URL %q outside development and test", value)
 	}
 	return nil

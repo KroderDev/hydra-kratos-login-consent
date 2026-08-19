@@ -25,7 +25,8 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
 
 FROM alpine:3.24.1 AS runtime
 
-RUN addgroup -S app \
+RUN apk upgrade --no-cache \
+    && addgroup -S app \
     && adduser -S -G app -h /nonexistent -s /sbin/nologin app
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt

@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.5.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.4.3...v0.5.0) (2026-08-19)
+
+
+### Features
+
+* **config:** make Hydra challenge length configurable ([30a348e](https://github.com/KroderDev/hydra-kratos-login-consent/commit/30a348ed4a66dcaf9fb7640ff3dc8ba7c2b3a2f0))
+* **config:** make Hydra challenge length configurable ([ce7c4cb](https://github.com/KroderDev/hydra-kratos-login-consent/commit/ce7c4cb4f73322e58f2ebe4f3c49472736710be5))
+
+
+### Bug Fixes
+
+* **config:** adjust MaxChallengeLengthLimit to 4096 bytes for HTTP MaxHeaderBytes budget ([1ada15f](https://github.com/KroderDev/hydra-kratos-login-consent/commit/1ada15f39ace09af092b8f867f18af837afb393a))
+* **config:** enforce upper bound limit and add security test suite for challenge validation ([181fd0f](https://github.com/KroderDev/hydra-kratos-login-consent/commit/181fd0fc9003785686c7d00cb02f4eb56b5fdfa0))
+
+
+### Dependencies
+
+* **deps:** bump github.com/redis/go-redis/v9 in the go-non-major group ([b8add00](https://github.com/KroderDev/hydra-kratos-login-consent/commit/b8add00bb0b69d95dceba537e28dec76abb2a5ad))
+
+
+### Tests
+
+* **application:** expand statement and branch coverage for helper methods ([7762f38](https://github.com/KroderDev/hydra-kratos-login-consent/commit/7762f3843051d17127f6c444e5d1b7a579bd5a9f))
+
 ## [0.4.3](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.4.2...v0.4.3) (2026-08-16)
 
 

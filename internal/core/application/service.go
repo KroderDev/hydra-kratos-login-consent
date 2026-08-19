@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/config"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/domain"
@@ -85,7 +86,7 @@ func NewService(cfg config.Config, dependencies Dependencies) (*Service, error) 
 
 // StartLogin validates a Hydra login challenge and starts or completes login.
 func (s *Service) StartLogin(ctx context.Context, challenge string, input ports.LoginStartInput) (RedirectResult, error) {
-	if err := validateChallenge(challenge); err != nil {
+	if err := validateChallenge(challenge, s.cfg.EffectiveMaxChallengeLength()); err != nil {
 		return RedirectResult{}, err
 	}
 	request, err := s.login.GetLoginRequest(ctx, challenge)
@@ -193,7 +194,7 @@ func (s *Service) CompleteLogin(ctx context.Context, handle string, input ports.
 
 // StartConsent validates a Hydra consent challenge and starts or completes consent.
 func (s *Service) StartConsent(ctx context.Context, challenge string, input ports.ConsentStartInput) (RedirectResult, error) {
-	if err := validateChallenge(challenge); err != nil {
+	if err := validateChallenge(challenge, s.cfg.EffectiveMaxChallengeLength()); err != nil {
 		return RedirectResult{}, err
 	}
 	request, err := s.consent.GetConsentRequest(ctx, challenge)
@@ -300,7 +301,7 @@ func (s *Service) CompleteConsent(ctx context.Context, input ConsentInput) (Redi
 // StartLogout validates a Hydra logout challenge and starts a browser-bound
 // logout handoff.
 func (s *Service) StartLogout(ctx context.Context, challenge string, input ports.LogoutStartInput) (RedirectResult, error) {
-	if err := validateChallenge(challenge); err != nil {
+	if err := validateChallenge(challenge, s.cfg.EffectiveMaxChallengeLength()); err != nil {
 		return RedirectResult{}, err
 	}
 	request, err := s.logout.GetLogoutRequest(ctx, challenge)
@@ -575,9 +576,9 @@ func addQueryValue(target, name, value string) (string, error) {
 	return parsed.String(), nil
 }
 
-// validateChallenge verifies that a challenge is non-empty, within the maximum allowed length, and contains no line breaks.
-func validateChallenge(value string) error {
-	if value == "" || len(value) > domain.MaxChallengeLength || strings.ContainsAny(value, "\r\n") {
+// validateChallenge verifies that a challenge is non-empty, within the maximum allowed length, and contains no control characters.
+func validateChallenge(value string, maxLength int) error {
+	if value == "" || maxLength <= 0 || len(value) > maxLength || strings.IndexFunc(value, unicode.IsControl) >= 0 {
 		return domain.ErrInvalidChallenge
 	}
 	return nil

@@ -44,6 +44,7 @@ type Config struct {
 	RequiredAAL               string
 	TransactionTTL            time.Duration
 	MaxPendingTransactions    int
+	MaxChallengeLength        int
 	Clients                   map[string]Client
 	PolicyBackend             PolicyBackend
 	PolicyURL                 *url.URL
@@ -54,6 +55,8 @@ const (
 	DefaultTransactionTTL         = 5 * time.Minute
 	MaxTransactionTTL             = 15 * time.Minute
 	DefaultMaxPendingTransactions = 10_000
+	DefaultMaxChallengeLength     = 2048
+	MaxChallengeLengthLimit       = 4096
 )
 
 // Validate rejects unsafe or incomplete provider configuration.
@@ -88,6 +91,9 @@ func (c Config) Validate() error {
 	}
 	if c.MaxPendingTransactions < 0 {
 		return fmt.Errorf("max pending transactions cannot be negative")
+	}
+	if c.MaxChallengeLength < 0 || c.MaxChallengeLength > MaxChallengeLengthLimit {
+		return fmt.Errorf("max challenge length must be between 0 and %d", MaxChallengeLengthLimit)
 	}
 	if err := c.OIDCIdentityClaimMappings.Validate(c.IsSecureEnvironment()); err != nil {
 		return fmt.Errorf("validate oidc identity claim mappings: %w", err)
@@ -144,6 +150,15 @@ func (c Config) EffectiveMaxPendingTransactions() int {
 		return DefaultMaxPendingTransactions
 	}
 	return c.MaxPendingTransactions
+}
+
+// EffectiveMaxChallengeLength returns the configured challenge limit or the
+// default used by callers that construct Config directly.
+func (c Config) EffectiveMaxChallengeLength() int {
+	if c.MaxChallengeLength <= 0 {
+		return DefaultMaxChallengeLength
+	}
+	return c.MaxChallengeLength
 }
 
 func (c Config) secureTransportRequired() bool {

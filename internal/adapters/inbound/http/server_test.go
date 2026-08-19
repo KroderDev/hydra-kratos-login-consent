@@ -577,3 +577,51 @@ func testClient() domain.Client {
 		RedirectURIs: []string{"https://client.example/callback"},
 	}
 }
+
+func TestServer_Security_OriginHeaderForgery(t *testing.T) {
+	t.Parallel()
+
+	handler, _, _, _ := newTestHandler(t)
+
+	forgedOrigins := []struct {
+		name   string
+		origin string
+		want   int
+	}{
+		{name: "disallowed domain", origin: "https://attacker.com", want: http.StatusForbidden},
+		{name: "subdomain trick", origin: "https://ui.example.attacker.com", want: http.StatusForbidden},
+		{name: "http scheme downgrade", origin: "http://ui.example", want: http.StatusForbidden},
+		{name: "valid origin", origin: "https://ui.example", want: http.StatusBadRequest},
+	}
+
+	for _, tt := range forgedOrigins {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/consent", nil)
+			request.Header.Set("Origin", tt.origin)
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != tt.want {
+				t.Fatalf("Origin %q status = %d, want %d", tt.origin, recorder.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestServer_Security_CRLFHeaderInjection(t *testing.T) {
+	t.Parallel()
+
+	handler, _, _, _ := newTestHandler(t)
+
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/login?login_challenge=secret%0d%0aSet-Cookie:evil=1", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("CRLF challenge request status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}

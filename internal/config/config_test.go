@@ -3,6 +3,8 @@ package config
 import (
 	"testing"
 	"time"
+
+	coreconfig "github.com/kroderdev/hydra-kratos-login-consent/internal/core/config"
 )
 
 //nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
@@ -19,6 +21,13 @@ func TestLoadDefaultsAndClientIDs(t *testing.T) {
 	}
 	if cfg.RequiredAAL != "aal2" {
 		t.Fatalf("RequiredAAL = %q, want aal2", cfg.RequiredAAL)
+	}
+	if cfg.EffectiveMaxChallengeLength() != coreconfig.DefaultMaxChallengeLength {
+		t.Fatalf(
+			"max challenge length = %d, want %d",
+			cfg.EffectiveMaxChallengeLength(),
+			coreconfig.DefaultMaxChallengeLength,
+		)
 	}
 	if cfg.PolicyBackend != PolicyBackendStatic || cfg.PolicyURL != nil {
 		t.Fatalf("policy config = %#v, want static defaults", cfg)
@@ -57,6 +66,7 @@ func TestLoadParsesConfiguredValues(t *testing.T) {
 	t.Setenv("ENVIRONMENT", " TEST ")
 	t.Setenv("TRANSACTION_TTL", "30s")
 	t.Setenv("MAX_PENDING_TRANSACTIONS", "17")
+	t.Setenv("MAX_CHALLENGE_LENGTH", "4096")
 	t.Setenv("REQUIRED_AAL", "aal1")
 	t.Setenv("KRATOS_SESSION_COOKIE", "custom_session")
 	t.Setenv("ALLOWED_CLIENTS", `{"client":{"allowed_redirect_uris":["https://client.example/callback"]}}`)
@@ -65,7 +75,13 @@ func TestLoadParsesConfiguredValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.ListenAddress != "127.0.0.1:9090" || cfg.Environment != "test" || cfg.TransactionTTL != 30*time.Second || cfg.MaxPendingTransactions != 17 || cfg.RequiredAAL != "aal1" || cfg.KratosSessionCookie != "custom_session" {
+	if cfg.ListenAddress != "127.0.0.1:9090" ||
+		cfg.Environment != "test" ||
+		cfg.TransactionTTL != 30*time.Second ||
+		cfg.MaxPendingTransactions != 17 ||
+		cfg.MaxChallengeLength != 4096 ||
+		cfg.RequiredAAL != "aal1" ||
+		cfg.KratosSessionCookie != "custom_session" {
 		t.Fatalf("parsed config = %#v", cfg)
 	}
 }
@@ -129,6 +145,7 @@ func TestLoadRejectsMalformedConfiguredValues(t *testing.T) {
 		value string
 	}{
 		{name: "pending transactions", key: "MAX_PENDING_TRANSACTIONS", value: "not-an-int"},
+		{name: "challenge length", key: "MAX_CHALLENGE_LENGTH", value: "not-an-int"},
 		{name: "allowed clients", key: "ALLOWED_CLIENTS", value: "{"},
 		{name: "unsupported URL scheme", key: "PUBLIC_URL", value: "ftp://provider.example"},
 		{name: "malformed policy URL", key: "POLICY_URL", value: "%gh"},
@@ -167,4 +184,5 @@ func setRequiredEnvironment(t *testing.T) {
 	t.Setenv("POLICY_URL", "")
 	t.Setenv("POLICY_AUTH_TOKEN", "")
 	t.Setenv("OIDC_IDENTITY_CLAIM_MAPPINGS", "")
+	t.Setenv("MAX_CHALLENGE_LENGTH", "")
 }

@@ -86,7 +86,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	challenge, err := requiredQuery(r, "login_challenge", domain.MaxChallengeLength)
+	challenge, err := requiredQuery(r, "login_challenge", s.cfg.EffectiveMaxChallengeLength())
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -133,7 +133,7 @@ func (s *Server) handleLoginCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConsent(w http.ResponseWriter, r *http.Request) {
-	challenge, err := requiredQuery(r, "consent_challenge", domain.MaxChallengeLength)
+	challenge, err := requiredQuery(r, "consent_challenge", s.cfg.EffectiveMaxChallengeLength())
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -186,7 +186,7 @@ func (s *Server) handleConsentSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	challenge, err := requiredQuery(r, "logout_challenge", domain.MaxChallengeLength)
+	challenge, err := requiredQuery(r, "logout_challenge", s.cfg.EffectiveMaxChallengeLength())
 	if err != nil {
 		s.writeError(w, r, err)
 		return

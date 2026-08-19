@@ -86,6 +86,7 @@ The server reads configuration from environment variables:
 | `REQUIRED_AAL` | Minimum assurance level, default `aal2`. |
 | `TRANSACTION_TTL` | Browser transaction lifetime, default `5m`, maximum `15m`. |
 | `MAX_PENDING_TRANSACTIONS` | Per-process pending transaction quota, default `10000`. |
+| `MAX_CHALLENGE_LENGTH` | Maximum login, consent, and logout challenge length in bytes, default `2048`; `0` uses the default. |
 | `ALLOWED_CLIENTS` | JSON client, redirect, scope, audience, and claim allowlists. |
 | `OIDC_IDENTITY_CLAIM_MAPPINGS` | Optional JSON mappings from sanitized Kratos traits/metadata to OIDC claims. |
 | `ALLOWED_SUBJECTS` | Comma-separated subjects for the static policy adapter. |

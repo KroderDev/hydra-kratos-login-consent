@@ -65,6 +65,13 @@ func Load() (coreconfig.Config, error) {
 			return coreconfig.Config{}, fmt.Errorf("parse max_pending_transactions: %w", err)
 		}
 	}
+	maxChallengeLength := coreconfig.DefaultMaxChallengeLength
+	if value := strings.TrimSpace(os.Getenv("MAX_CHALLENGE_LENGTH")); value != "" {
+		maxChallengeLength, err = strconv.Atoi(value)
+		if err != nil {
+			return coreconfig.Config{}, fmt.Errorf("parse max_challenge_length: %w", err)
+		}
+	}
 	environment := strings.ToLower(strings.TrimSpace(os.Getenv("ENVIRONMENT")))
 	if environment == "" {
 		environment = "development"
@@ -110,6 +117,7 @@ func Load() (coreconfig.Config, error) {
 		RequiredAAL:               envOrDefault("REQUIRED_AAL", "aal2"),
 		TransactionTTL:            ttl,
 		MaxPendingTransactions:    maxPendingTransactions,
+		MaxChallengeLength:        maxChallengeLength,
 		Clients:                   clients,
 		PolicyBackend:             coreconfig.PolicyBackend(policyBackend),
 		PolicyURL:                 policyURL,

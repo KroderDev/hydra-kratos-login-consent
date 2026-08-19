@@ -11,6 +11,7 @@ import (
 
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/adapters/outbound/state"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/config"
+	coreconfig "github.com/kroderdev/hydra-kratos-login-consent/internal/core/config"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/domain"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/identity"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/ports"
@@ -124,21 +125,55 @@ func TestValidateChallenge(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		value string
-		want  error
+		name      string
+		value     string
+		maxLength int
+		want      error
 	}{
-		{name: "empty", value: "", want: domain.ErrInvalidChallenge},
-		{name: "carriage return", value: "challenge\r", want: domain.ErrInvalidChallenge},
-		{name: "newline", value: "challenge\n", want: domain.ErrInvalidChallenge},
-		{name: "oversized", value: strings.Repeat("a", domain.MaxChallengeLength+1), want: domain.ErrInvalidChallenge},
-		{name: "maximum length", value: strings.Repeat("a", domain.MaxChallengeLength), want: nil},
-		{name: "valid", value: "login-challenge", want: nil},
+		{
+			name:      "empty",
+			value:     "",
+			maxLength: coreconfig.DefaultMaxChallengeLength,
+			want:      domain.ErrInvalidChallenge,
+		},
+		{
+			name:      "carriage return",
+			value:     "challenge\r",
+			maxLength: coreconfig.DefaultMaxChallengeLength,
+			want:      domain.ErrInvalidChallenge,
+		},
+		{
+			name:      "newline",
+			value:     "challenge\n",
+			maxLength: coreconfig.DefaultMaxChallengeLength,
+			want:      domain.ErrInvalidChallenge,
+		},
+		{
+			name:      "oversized",
+			value:     strings.Repeat("a", coreconfig.DefaultMaxChallengeLength+1),
+			maxLength: coreconfig.DefaultMaxChallengeLength,
+			want:      domain.ErrInvalidChallenge,
+		},
+		{
+			name:      "maximum length",
+			value:     strings.Repeat("a", coreconfig.DefaultMaxChallengeLength),
+			maxLength: coreconfig.DefaultMaxChallengeLength,
+		},
+		{
+			name:      "configured length",
+			value:     strings.Repeat("a", coreconfig.DefaultMaxChallengeLength+1),
+			maxLength: coreconfig.DefaultMaxChallengeLength + 1,
+		},
+		{
+			name:      "valid",
+			value:     "login-challenge",
+			maxLength: coreconfig.DefaultMaxChallengeLength,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if err := validateChallenge(tt.value); !errors.Is(err, tt.want) {
+			if err := validateChallenge(tt.value, tt.maxLength); !errors.Is(err, tt.want) {
 				t.Fatalf("validateChallenge(%q) error = %v, want %v", tt.value, err, tt.want)
 			}
 		})
@@ -1068,4 +1103,178 @@ func (f *fakePolicy) AuthorizeLogin(_ context.Context, input ports.PolicyInput) 
 func (f *fakePolicy) AuthorizeConsent(_ context.Context, input ports.PolicyInput) (ports.ConsentDecision, error) {
 	f.consentInput = input
 	return f.consentDecision, f.consentErr
+}
+
+func TestService_Security_CRLFResponseSplitting(t *testing.T) {
+	t.Parallel()
+
+	service, _, _, _, _ := newTestService(t)
+
+	crlfPayloads := []struct {
+		name    string
+		payload string
+	}{
+		{name: "crlf header injection", payload: "login-challenge\r\nSet-Cookie: evil=true"},
+		{name: "carriage return alone", payload: "login-challenge\rLocation: https://attacker.com"},
+		{name: "newline alone", payload: "login-challenge\nLocation: https://attacker.com"},
+		{name: "url encoded crlf", payload: "login-challenge%0d%0aSet-Cookie:evil=true"},
+		{name: "vertical tab", payload: "login-challenge\vSet-Cookie:evil=true"},
+		{name: "form feed", payload: "login-challenge\fSet-Cookie:evil=true"},
+	}
+
+	for _, tt := range crlfPayloads {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			if _, err := service.StartLogin(ctx, tt.payload, ports.LoginStartInput{}); !errors.Is(err, domain.ErrInvalidChallenge) {
+				t.Fatalf("StartLogin(%q) error = %v, want %v", tt.payload, err, domain.ErrInvalidChallenge)
+			}
+			if _, err := service.StartConsent(ctx, tt.payload, ports.ConsentStartInput{}); !errors.Is(err, domain.ErrInvalidChallenge) {
+				t.Fatalf("StartConsent(%q) error = %v, want %v", tt.payload, err, domain.ErrInvalidChallenge)
+			}
+			if _, err := service.StartLogout(ctx, tt.payload, ports.LogoutStartInput{}); !errors.Is(err, domain.ErrInvalidChallenge) {
+				t.Fatalf("StartLogout(%q) error = %v, want %v", tt.payload, err, domain.ErrInvalidChallenge)
+			}
+		})
+	}
+}
+
+func TestService_Security_OpenRedirectBypass(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+
+	//nolint:gosec // Test fixture CSRF parameter values.
+	invalidParams := []struct {
+		name        string
+		flow        domain.Flow
+		transaction string
+		csrfToken   string
+	}{
+		{name: "empty transaction", flow: domain.FlowLogin, transaction: "", csrfToken: "valid-csrf"},
+		{name: "empty csrf", flow: domain.FlowLogin, transaction: "valid-tx", csrfToken: ""},
+		{name: "invalid flow", flow: domain.Flow("invalid"), transaction: "valid-tx", csrfToken: "valid-csrf"},
+	}
+
+	for _, tt := range invalidParams {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := cfg.ExternalRedirect(tt.flow, tt.transaction, tt.csrfToken); !errors.Is(err, domain.ErrInvalidTransaction) {
+				t.Fatalf("ExternalRedirect(%q, %q, %q) error = %v, want %v", tt.flow, tt.transaction, tt.csrfToken, err, domain.ErrInvalidTransaction)
+			}
+		})
+	}
+
+	// Verify that constructed redirects maintain strict host origin and do not permit scheme injection
+	redirectURL, err := cfg.ExternalRedirect(domain.FlowLogin, "tx-123", "csrf-456")
+	if err != nil {
+		t.Fatalf("ExternalRedirect unexpected error: %v", err)
+	}
+	parsed, err := url.Parse(redirectURL)
+	if err != nil {
+		t.Fatalf("parse redirect URL: %v", err)
+	}
+	if parsed.Scheme != cfg.ExternalUIURL.Scheme || parsed.Host != cfg.ExternalUIURL.Host {
+		t.Fatalf("redirect URL origin = %s://%s, want %s://%s", parsed.Scheme, parsed.Host, cfg.ExternalUIURL.Scheme, cfg.ExternalUIURL.Host)
+	}
+}
+
+func TestService_Security_ControlCharLogInjection(t *testing.T) {
+	t.Parallel()
+
+	logInjectionPayloads := []struct {
+		name  string
+		input string
+	}{
+		{name: "fake log line injection", input: "challenge-123\n[INFO] User elevated privileges to root"},
+		{name: "ansi escape sequences", input: "challenge-123\x1b[31mRED_ALERT\x1b[0m"},
+		{name: "null byte injection", input: "challenge-123\x00admin"},
+	}
+
+	for _, tt := range logInjectionPayloads {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := validateChallenge(tt.input, 2048); !errors.Is(err, domain.ErrInvalidChallenge) {
+				t.Fatalf("validateChallenge(%q) error = %v, want %v", tt.input, err, domain.ErrInvalidChallenge)
+			}
+		})
+	}
+}
+
+func TestAddQueryValue(t *testing.T) {
+	t.Parallel()
+
+	got, err := addQueryValue("https://example.com/login?foo=bar", "skip_consent", "true")
+	if err != nil {
+		t.Fatalf("addQueryValue unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "skip_consent=true") || !strings.Contains(got, "foo=bar") {
+		t.Fatalf("addQueryValue = %q, want updated query params", got)
+	}
+
+	if _, err := addQueryValue(":%invalid-url", "key", "val"); !errors.Is(err, domain.ErrInvalidRedirect) {
+		t.Fatalf("addQueryValue invalid target error = %v, want %v", err, domain.ErrInvalidRedirect)
+	}
+}
+
+func TestValidateRemember(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		remember    bool
+		rememberFor int64
+		want        error
+	}{
+		{name: "valid remember", remember: true, rememberFor: 3600, want: nil},
+		{name: "negative remember for", remember: true, rememberFor: -1, want: domain.ErrInvalidRemember},
+		{name: "exceeds max duration", remember: true, rememberFor: 86401, want: domain.ErrInvalidRemember},
+		{name: "not remember with non-zero duration", remember: false, rememberFor: 3600, want: domain.ErrInvalidRemember},
+		{name: "not remember with zero duration", remember: false, rememberFor: 0, want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := validateRemember(tt.remember, tt.rememberFor); !errors.Is(err, tt.want) {
+				t.Fatalf("validateRemember(%v, %d) error = %v, want %v", tt.remember, tt.rememberFor, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestTransactionAdmission_Cancel(t *testing.T) {
+	t.Parallel()
+
+	admission := newTransactionAdmission(10, time.Now)
+	if !admission.reserve(time.Now().Add(time.Minute)) {
+		t.Fatal("reserve returned false")
+	}
+	admission.cancel()
+	if admission.reserved != 0 {
+		t.Fatalf("reserved = %d, want 0 after cancel", admission.reserved)
+	}
+}
+
+func TestStartBrowserState(t *testing.T) {
+	t.Parallel()
+
+	s := &Service{}
+	state1, err := s.startBrowserState("")
+	if err != nil || state1 == "" {
+		t.Fatalf("startBrowserState(\"\") error = %v, state = %q", err, state1)
+	}
+
+	state2, err := s.startBrowserState(state1)
+	if err != nil || state2 != state1 {
+		t.Fatalf("startBrowserState(%q) error = %v, want %q", state1, err, state1)
+	}
+
+	if _, err := s.startBrowserState("invalid-opaque-token"); !errors.Is(err, domain.ErrInvalidBrowserState) {
+		t.Fatalf("startBrowserState(invalid) error = %v, want %v", err, domain.ErrInvalidBrowserState)
+	}
 }

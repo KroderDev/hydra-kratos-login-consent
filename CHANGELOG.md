@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.1](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.5.0...v0.5.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* **container:** upgrade Alpine base OS packages to resolve Trivy vulnerability scan failure ([3ec982b](https://github.com/KroderDev/hydra-kratos-login-consent/commit/3ec982b0b189e6ba07a5471bbdc4656718993916))
+* **container:** upgrade Alpine base OS packages to resolve Trivy vulnerability scan failure ([69d4295](https://github.com/KroderDev/hydra-kratos-login-consent/commit/69d429522fe702ca48497f105411e25f8ba60cad))
+
+
+### Documentation
+
+* **configuration:** clarify default 2048, max limit 4096, and server 16 KB header limit for MAX_CHALLENGE_LENGTH ([1daec98](https://github.com/KroderDev/hydra-kratos-login-consent/commit/1daec98a38e1a66703b9658f44ab1fcd6d4c4186))
+
 ## [0.5.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.4.3...v0.5.0) (2026-08-19)
 
 

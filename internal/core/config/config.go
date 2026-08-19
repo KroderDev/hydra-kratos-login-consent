@@ -56,7 +56,7 @@ const (
 	MaxTransactionTTL             = 15 * time.Minute
 	DefaultMaxPendingTransactions = 10_000
 	DefaultMaxChallengeLength     = 2048
-	MaxChallengeLengthLimit       = 16384
+	MaxChallengeLengthLimit       = 4096
 )
 
 // Validate rejects unsafe or incomplete provider configuration.

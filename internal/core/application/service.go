@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/config"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/domain"
@@ -575,9 +576,9 @@ func addQueryValue(target, name, value string) (string, error) {
 	return parsed.String(), nil
 }
 
-// validateChallenge verifies that a challenge is non-empty, within the maximum allowed length, and contains no line breaks.
+// validateChallenge verifies that a challenge is non-empty, within the maximum allowed length, and contains no control characters.
 func validateChallenge(value string, maxLength int) error {
-	if value == "" || maxLength <= 0 || len(value) > maxLength || strings.ContainsAny(value, "\r\n") {
+	if value == "" || maxLength <= 0 || len(value) > maxLength || strings.IndexFunc(value, unicode.IsControl) >= 0 {
 		return domain.ErrInvalidChallenge
 	}
 	return nil

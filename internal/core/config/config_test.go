@@ -324,6 +324,7 @@ func TestConfigValidateRejectsInvalidCoreSettings(t *testing.T) {
 		{name: "zero transaction ttl", mutate: func(cfg *Config) { cfg.TransactionTTL = 0 }},
 		{name: "negative pending limit", mutate: func(cfg *Config) { cfg.MaxPendingTransactions = -1 }},
 		{name: "negative challenge length", mutate: func(cfg *Config) { cfg.MaxChallengeLength = -1 }},
+		{name: "exceeding challenge length", mutate: func(cfg *Config) { cfg.MaxChallengeLength = MaxChallengeLengthLimit + 1 }},
 		{name: "client key mismatch", mutate: func(cfg *Config) {
 			cfg.Clients["wrong-key"] = cfg.Clients["example-client"]
 			delete(cfg.Clients, "example-client")
@@ -487,5 +488,75 @@ func validConfig(t *testing.T) Config {
 				AllowedRedirectURIs: []string{"https://client.example/callback"},
 			},
 		},
+	}
+}
+
+func TestConfig_Security_JSONPointerPathTraversal(t *testing.T) {
+	t.Parallel()
+
+	traversalPointers := []struct {
+		name    string
+		pointer string
+	}{
+		{name: "missing leading slash", pointer: "traits/email"},
+		{name: "unsupported root token", pointer: "/other/field"},
+		{name: "wildcard selector", pointer: "/traits/*"},
+		{name: "jsonpath filter", pointer: "/traits[0]"},
+	}
+
+	for _, tt := range traversalPointers {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := validConfig(t)
+			cfg.OIDCIdentityClaimMappings = identity.ClaimMappings{
+				"custom_claim": identity.Mapping{
+					Sources: []string{tt.pointer},
+					Type:    "string",
+				},
+			}
+
+			if err := cfg.Validate(); err == nil {
+				t.Fatalf("Validate accepted malformed JSON pointer %q", tt.pointer)
+			}
+		})
+	}
+}
+
+func TestConfig_Security_NativeClientLoopbackIP(t *testing.T) {
+	t.Parallel()
+
+	loopbackTests := []struct {
+		name string
+		uri  string
+		want bool
+	}{
+		{name: "localhost hostname rejected in secure env", uri: "http://localhost:51004/callback", want: false},
+		{name: "127.0.0.1 IP literal allowed", uri: "http://127.0.0.1:51004/callback", want: true},
+		{name: "IPv6 loopback literal allowed", uri: "http://[::1]:51004/callback", want: true},
+		{name: "public http URL rejected in secure env", uri: "http://client.example/callback", want: false},
+	}
+
+	for _, tt := range loopbackTests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := validConfig(t)
+			cfg.Environment = "production"
+			cfg.Clients = map[string]Client{
+				"native-client": {
+					ID:                  "native-client",
+					AllowedRedirectURIs: []string{tt.uri},
+				},
+			}
+
+			err := cfg.Validate()
+			if tt.want && err != nil {
+				t.Fatalf("Validate rejected valid loopback URI %q: %v", tt.uri, err)
+			}
+			if !tt.want && err == nil {
+				t.Fatalf("Validate accepted invalid loopback URI %q in secure environment", tt.uri)
+			}
+		})
 	}
 }

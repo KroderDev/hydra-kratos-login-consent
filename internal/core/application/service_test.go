@@ -1104,3 +1104,102 @@ func (f *fakePolicy) AuthorizeConsent(_ context.Context, input ports.PolicyInput
 	f.consentInput = input
 	return f.consentDecision, f.consentErr
 }
+
+func TestService_Security_CRLFResponseSplitting(t *testing.T) {
+	t.Parallel()
+
+	service, _, _, _, _ := newTestService(t)
+
+	crlfPayloads := []struct {
+		name    string
+		payload string
+	}{
+		{name: "crlf header injection", payload: "login-challenge\r\nSet-Cookie: evil=true"},
+		{name: "carriage return alone", payload: "login-challenge\rLocation: https://attacker.com"},
+		{name: "newline alone", payload: "login-challenge\nLocation: https://attacker.com"},
+		{name: "url encoded crlf", payload: "login-challenge%0d%0aSet-Cookie:evil=true"},
+		{name: "vertical tab", payload: "login-challenge\vSet-Cookie:evil=true"},
+		{name: "form feed", payload: "login-challenge\fSet-Cookie:evil=true"},
+	}
+
+	for _, tt := range crlfPayloads {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			if _, err := service.StartLogin(ctx, tt.payload, ports.LoginStartInput{}); !errors.Is(err, domain.ErrInvalidChallenge) {
+				t.Fatalf("StartLogin(%q) error = %v, want %v", tt.payload, err, domain.ErrInvalidChallenge)
+			}
+			if _, err := service.StartConsent(ctx, tt.payload, ports.ConsentStartInput{}); !errors.Is(err, domain.ErrInvalidChallenge) {
+				t.Fatalf("StartConsent(%q) error = %v, want %v", tt.payload, err, domain.ErrInvalidChallenge)
+			}
+			if _, err := service.StartLogout(ctx, tt.payload, ports.LogoutStartInput{}); !errors.Is(err, domain.ErrInvalidChallenge) {
+				t.Fatalf("StartLogout(%q) error = %v, want %v", tt.payload, err, domain.ErrInvalidChallenge)
+			}
+		})
+	}
+}
+
+func TestService_Security_OpenRedirectBypass(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+
+	//nolint:gosec // Test fixture CSRF parameter values.
+	invalidParams := []struct {
+		name        string
+		flow        domain.Flow
+		transaction string
+		csrfToken   string
+	}{
+		{name: "empty transaction", flow: domain.FlowLogin, transaction: "", csrfToken: "valid-csrf"},
+		{name: "empty csrf", flow: domain.FlowLogin, transaction: "valid-tx", csrfToken: ""},
+		{name: "invalid flow", flow: domain.Flow("invalid"), transaction: "valid-tx", csrfToken: "valid-csrf"},
+	}
+
+	for _, tt := range invalidParams {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := cfg.ExternalRedirect(tt.flow, tt.transaction, tt.csrfToken); !errors.Is(err, domain.ErrInvalidTransaction) {
+				t.Fatalf("ExternalRedirect(%q, %q, %q) error = %v, want %v", tt.flow, tt.transaction, tt.csrfToken, err, domain.ErrInvalidTransaction)
+			}
+		})
+	}
+
+	// Verify that constructed redirects maintain strict host origin and do not permit scheme injection
+	redirectURL, err := cfg.ExternalRedirect(domain.FlowLogin, "tx-123", "csrf-456")
+	if err != nil {
+		t.Fatalf("ExternalRedirect unexpected error: %v", err)
+	}
+	parsed, err := url.Parse(redirectURL)
+	if err != nil {
+		t.Fatalf("parse redirect URL: %v", err)
+	}
+	if parsed.Scheme != cfg.ExternalUIURL.Scheme || parsed.Host != cfg.ExternalUIURL.Host {
+		t.Fatalf("redirect URL origin = %s://%s, want %s://%s", parsed.Scheme, parsed.Host, cfg.ExternalUIURL.Scheme, cfg.ExternalUIURL.Host)
+	}
+}
+
+func TestService_Security_ControlCharLogInjection(t *testing.T) {
+	t.Parallel()
+
+	logInjectionPayloads := []struct {
+		name  string
+		input string
+	}{
+		{name: "fake log line injection", input: "challenge-123\n[INFO] User elevated privileges to root"},
+		{name: "ansi escape sequences", input: "challenge-123\x1b[31mRED_ALERT\x1b[0m"},
+		{name: "null byte injection", input: "challenge-123\x00admin"},
+	}
+
+	for _, tt := range logInjectionPayloads {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := validateChallenge(tt.input, 2048); !errors.Is(err, domain.ErrInvalidChallenge) {
+				t.Fatalf("validateChallenge(%q) error = %v, want %v", tt.input, err, domain.ErrInvalidChallenge)
+			}
+		})
+	}
+}

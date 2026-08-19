@@ -56,6 +56,7 @@ const (
 	MaxTransactionTTL             = 15 * time.Minute
 	DefaultMaxPendingTransactions = 10_000
 	DefaultMaxChallengeLength     = 2048
+	MaxChallengeLengthLimit       = 16384
 )
 
 // Validate rejects unsafe or incomplete provider configuration.
@@ -91,8 +92,8 @@ func (c Config) Validate() error {
 	if c.MaxPendingTransactions < 0 {
 		return fmt.Errorf("max pending transactions cannot be negative")
 	}
-	if c.MaxChallengeLength < 0 {
-		return fmt.Errorf("max challenge length cannot be negative")
+	if c.MaxChallengeLength < 0 || c.MaxChallengeLength > MaxChallengeLengthLimit {
+		return fmt.Errorf("max challenge length must be between 0 and %d", MaxChallengeLengthLimit)
 	}
 	if err := c.OIDCIdentityClaimMappings.Validate(c.IsSecureEnvironment()); err != nil {
 		return fmt.Errorf("validate oidc identity claim mappings: %w", err)

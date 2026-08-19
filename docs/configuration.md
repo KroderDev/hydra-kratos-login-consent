@@ -33,7 +33,7 @@ explicitly allowlisted native-app loopback IP literals described below.
 | `REQUIRED_AAL` | `aal2` | Minimum authenticator assurance level. Supported values are `aal1`, `aal2`, and `aal3`. |
 | `TRANSACTION_TTL` | `5m` | Lifetime of a browser transaction. It must be at least `1s` and no more than `15m`. |
 | `MAX_PENDING_TRANSACTIONS` | `10000` | Per-process pending transaction quota. `0` uses the default; negative values are invalid. This is not a shared global quota. |
-| `MAX_CHALLENGE_LENGTH` | `2048` | Maximum login, consent, and logout challenge length in bytes. `0` uses the default; negative values are invalid. The value must fit within the HTTP server's configured request-header limit. |
+| `MAX_CHALLENGE_LENGTH` | `2048` | Maximum login, consent, and logout challenge length in bytes. `0` uses the default; negative values or values exceeding `16384` are invalid. The value must fit within the HTTP server's configured request-header limit. |
 | `ALLOWED_CLIENTS` | empty object | JSON map of exact OAuth client and token policy allowlists. An empty map causes all client requests to be rejected. See [Client Allowlists](#client-allowlists). |
 | `OIDC_IDENTITY_CLAIM_MAPPINGS` | empty | Optional JSON map of exact, server-side mappings from sanitized Kratos traits and public metadata to OIDC claims. Empty or unset derives no identity claims. See [Identity Claim Mappings](#identity-claim-mappings). |
 | `ALLOWED_SUBJECTS` | empty | Comma-separated exact subject IDs used by the static policy backend. An empty value makes the static policy deny every subject. |

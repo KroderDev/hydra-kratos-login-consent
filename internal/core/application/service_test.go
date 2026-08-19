@@ -11,6 +11,7 @@ import (
 
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/adapters/outbound/state"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/config"
+	coreconfig "github.com/kroderdev/hydra-kratos-login-consent/internal/core/config"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/domain"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/identity"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/ports"
@@ -124,21 +125,55 @@ func TestValidateChallenge(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		value string
-		want  error
+		name      string
+		value     string
+		maxLength int
+		want      error
 	}{
-		{name: "empty", value: "", want: domain.ErrInvalidChallenge},
-		{name: "carriage return", value: "challenge\r", want: domain.ErrInvalidChallenge},
-		{name: "newline", value: "challenge\n", want: domain.ErrInvalidChallenge},
-		{name: "oversized", value: strings.Repeat("a", domain.MaxChallengeLength+1), want: domain.ErrInvalidChallenge},
-		{name: "maximum length", value: strings.Repeat("a", domain.MaxChallengeLength), want: nil},
-		{name: "valid", value: "login-challenge", want: nil},
+		{
+			name:      "empty",
+			value:     "",
+			maxLength: coreconfig.DefaultMaxChallengeLength,
+			want:      domain.ErrInvalidChallenge,
+		},
+		{
+			name:      "carriage return",
+			value:     "challenge\r",
+			maxLength: coreconfig.DefaultMaxChallengeLength,
+			want:      domain.ErrInvalidChallenge,
+		},
+		{
+			name:      "newline",
+			value:     "challenge\n",
+			maxLength: coreconfig.DefaultMaxChallengeLength,
+			want:      domain.ErrInvalidChallenge,
+		},
+		{
+			name:      "oversized",
+			value:     strings.Repeat("a", coreconfig.DefaultMaxChallengeLength+1),
+			maxLength: coreconfig.DefaultMaxChallengeLength,
+			want:      domain.ErrInvalidChallenge,
+		},
+		{
+			name:      "maximum length",
+			value:     strings.Repeat("a", coreconfig.DefaultMaxChallengeLength),
+			maxLength: coreconfig.DefaultMaxChallengeLength,
+		},
+		{
+			name:      "configured length",
+			value:     strings.Repeat("a", coreconfig.DefaultMaxChallengeLength+1),
+			maxLength: coreconfig.DefaultMaxChallengeLength + 1,
+		},
+		{
+			name:      "valid",
+			value:     "login-challenge",
+			maxLength: coreconfig.DefaultMaxChallengeLength,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if err := validateChallenge(tt.value); !errors.Is(err, tt.want) {
+			if err := validateChallenge(tt.value, tt.maxLength); !errors.Is(err, tt.want) {
 				t.Fatalf("validateChallenge(%q) error = %v, want %v", tt.value, err, tt.want)
 			}
 		})

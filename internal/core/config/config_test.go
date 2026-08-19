@@ -273,6 +273,19 @@ func TestConfigEffectiveMaxPendingTransactionsUsesBoundedDefault(t *testing.T) {
 	}
 }
 
+func TestConfigEffectiveMaxChallengeLengthUsesDefault(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t)
+	if got := cfg.EffectiveMaxChallengeLength(); got != DefaultMaxChallengeLength {
+		t.Fatalf("default max challenge length = %d, want %d", got, DefaultMaxChallengeLength)
+	}
+	cfg.MaxChallengeLength = 4096
+	if got := cfg.EffectiveMaxChallengeLength(); got != 4096 {
+		t.Fatalf("configured max challenge length = %d, want 4096", got)
+	}
+}
+
 func TestConfigExternalUIOriginAndRedirectValidation(t *testing.T) {
 	t.Parallel()
 
@@ -310,6 +323,7 @@ func TestConfigValidateRejectsInvalidCoreSettings(t *testing.T) {
 		{name: "unsupported assurance", mutate: func(cfg *Config) { cfg.RequiredAAL = "aal0" }},
 		{name: "zero transaction ttl", mutate: func(cfg *Config) { cfg.TransactionTTL = 0 }},
 		{name: "negative pending limit", mutate: func(cfg *Config) { cfg.MaxPendingTransactions = -1 }},
+		{name: "negative challenge length", mutate: func(cfg *Config) { cfg.MaxChallengeLength = -1 }},
 		{name: "client key mismatch", mutate: func(cfg *Config) {
 			cfg.Clients["wrong-key"] = cfg.Clients["example-client"]
 			delete(cfg.Clients, "example-client")

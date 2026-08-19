@@ -14,8 +14,6 @@ const (
 	FlowLogout  Flow = "logout"
 )
 
-const MaxChallengeLength = 2048
-
 // Client is the provider-owned subset of an OAuth client registration.
 type Client struct {
 	ID                     string

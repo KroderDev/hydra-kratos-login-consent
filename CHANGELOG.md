@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.2](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.5.1...v0.5.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* **ci:** clear stale Trivy DB cache on PR container scans ([3547fc9](https://github.com/KroderDev/hydra-kratos-login-consent/commit/3547fc954db1be22b4f014c8965d1b42da10b761))
+* **deps:** upgrade golang.org/x/sys to resolve Trivy vulnerability scan failure ([ebaa1fd](https://github.com/KroderDev/hydra-kratos-login-consent/commit/ebaa1fdb8c2e50c46ca1ad4079d0f30663111cdc))
+* **deps:** upgrade golang.org/x/sys to resolve Trivy vulnerability scan failure ([2de6b06](https://github.com/KroderDev/hydra-kratos-login-consent/commit/2de6b061e83a6417c93047046d86a5fb66c4cf7a))
+
 ## [0.5.1](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.5.0...v0.5.1) (2026-08-19)
 
 

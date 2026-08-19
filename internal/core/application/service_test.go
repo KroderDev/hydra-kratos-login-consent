@@ -1203,3 +1203,78 @@ func TestService_Security_ControlCharLogInjection(t *testing.T) {
 		})
 	}
 }
+
+func TestAddQueryValue(t *testing.T) {
+	t.Parallel()
+
+	got, err := addQueryValue("https://example.com/login?foo=bar", "skip_consent", "true")
+	if err != nil {
+		t.Fatalf("addQueryValue unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "skip_consent=true") || !strings.Contains(got, "foo=bar") {
+		t.Fatalf("addQueryValue = %q, want updated query params", got)
+	}
+
+	if _, err := addQueryValue(":%invalid-url", "key", "val"); !errors.Is(err, domain.ErrInvalidRedirect) {
+		t.Fatalf("addQueryValue invalid target error = %v, want %v", err, domain.ErrInvalidRedirect)
+	}
+}
+
+func TestValidateRemember(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		remember    bool
+		rememberFor int64
+		want        error
+	}{
+		{name: "valid remember", remember: true, rememberFor: 3600, want: nil},
+		{name: "negative remember for", remember: true, rememberFor: -1, want: domain.ErrInvalidRemember},
+		{name: "exceeds max duration", remember: true, rememberFor: 86401, want: domain.ErrInvalidRemember},
+		{name: "not remember with non-zero duration", remember: false, rememberFor: 3600, want: domain.ErrInvalidRemember},
+		{name: "not remember with zero duration", remember: false, rememberFor: 0, want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := validateRemember(tt.remember, tt.rememberFor); !errors.Is(err, tt.want) {
+				t.Fatalf("validateRemember(%v, %d) error = %v, want %v", tt.remember, tt.rememberFor, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestTransactionAdmission_Cancel(t *testing.T) {
+	t.Parallel()
+
+	admission := newTransactionAdmission(10, time.Now)
+	if !admission.reserve(time.Now().Add(time.Minute)) {
+		t.Fatal("reserve returned false")
+	}
+	admission.cancel()
+	if admission.reserved != 0 {
+		t.Fatalf("reserved = %d, want 0 after cancel", admission.reserved)
+	}
+}
+
+func TestStartBrowserState(t *testing.T) {
+	t.Parallel()
+
+	s := &Service{}
+	state1, err := s.startBrowserState("")
+	if err != nil || state1 == "" {
+		t.Fatalf("startBrowserState(\"\") error = %v, state = %q", err, state1)
+	}
+
+	state2, err := s.startBrowserState(state1)
+	if err != nil || state2 != state1 {
+		t.Fatalf("startBrowserState(%q) error = %v, want %q", state1, err, state1)
+	}
+
+	if _, err := s.startBrowserState("invalid-opaque-token"); !errors.Is(err, domain.ErrInvalidBrowserState) {
+		t.Fatalf("startBrowserState(invalid) error = %v, want %v", err, domain.ErrInvalidBrowserState)
+	}
+}

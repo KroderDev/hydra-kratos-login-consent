@@ -747,3 +747,52 @@ func TestRequiredQueryValue(t *testing.T) {
 		})
 	}
 }
+
+func TestStatusRecorder_WriteDefaultsToStatusOK(t *testing.T) {
+	t.Parallel()
+
+	base := httptest.NewRecorder()
+	rec := &statusRecorder{ResponseWriter: base}
+	_, _ = rec.Write([]byte("hello"))
+	if rec.status != http.StatusOK {
+		t.Fatalf("rec.status = %d, want 200", rec.status)
+	}
+}
+
+func TestServer_HandlerQueryErrors(t *testing.T) {
+	t.Parallel()
+
+	handler, _, _, _ := newTestHandler(t)
+
+	// Missing transaction in callback
+	req1 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/login/callback?csrf=tok", nil)
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusBadRequest {
+		t.Fatalf("missing transaction status = %d, want 400", rec1.Code)
+	}
+
+	// Missing csrf in callback
+	req2 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/login/callback?transaction=tx", nil)
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusBadRequest {
+		t.Fatalf("missing csrf status = %d, want 400", rec2.Code)
+	}
+
+	// Missing challenge in consent
+	req3 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/consent", nil)
+	rec3 := httptest.NewRecorder()
+	handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusBadRequest {
+		t.Fatalf("missing consent challenge status = %d, want 400", rec3.Code)
+	}
+
+	// Missing challenge in logout
+	req4 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/logout", nil)
+	rec4 := httptest.NewRecorder()
+	handler.ServeHTTP(rec4, req4)
+	if rec4.Code != http.StatusBadRequest {
+		t.Fatalf("missing logout challenge status = %d, want 400", rec4.Code)
+	}
+}

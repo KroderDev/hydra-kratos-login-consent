@@ -288,12 +288,12 @@ func TestNewHTTPClient(t *testing.T) {
 
 //nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
 func TestRun_InvalidListenAddress(t *testing.T) {
+	t.Setenv("PUBLIC_URL", "https://provider.example")
+	t.Setenv("EXTERNAL_UI_URL", "https://ui.example")
 	t.Setenv("HYDRA_ADMIN_URL", "https://hydra.example")
 	t.Setenv("HYDRA_PUBLIC_URL", "https://hydra.example")
 	t.Setenv("KRATOS_PUBLIC_URL", "https://kratos.example")
-	t.Setenv("EXTERNAL_UI_URL", "https://ui.example")
-	t.Setenv("CLIENT_TEST_ALLOWED_REDIRECT_URIS", "https://example.com/callback")
-	t.Setenv("CLIENT_TEST_ALLOWED_SCOPES", "openid")
+	t.Setenv("ALLOWED_CLIENTS", `{"test-client":{"id":"test-client","allowed_redirect_uris":["https://example.com/cb"],"allowed_scopes":["openid"]}}`)
 	t.Setenv("LISTEN_ADDRESS", "999.999.999.999:99999")
 
 	err := run()

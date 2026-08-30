@@ -504,11 +504,11 @@ func (s *Server) browserStateCookieName(name string) string {
 }
 
 func newRequestID() (string, error) {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
 		return "", fmt.Errorf("generate request id: %w", err)
 	}
-	return hex.EncodeToString(value[:]), nil
+	return hex.EncodeToString(value), nil
 }
 
 func statusForError(err error) int {

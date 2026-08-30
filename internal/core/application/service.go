@@ -727,11 +727,11 @@ func contains(values []string, expected string) bool {
 }
 
 func newOpaqueToken() (string, error) {
-	var value [32]byte
-	if _, err := rand.Read(value[:]); err != nil {
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
 		return "", fmt.Errorf("generate transaction csrf token: %w", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(value[:]), nil
+	return base64.RawURLEncoding.EncodeToString(value), nil
 }
 
 func (s *Service) startBrowserState(value string) (string, error) {

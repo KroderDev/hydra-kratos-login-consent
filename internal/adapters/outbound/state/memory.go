@@ -114,11 +114,11 @@ func (s *MemoryStore) Consume(_ context.Context, handle string) (domain.Transact
 }
 
 func randomHandle() (string, error) {
-	var value [32]byte
-	if _, err := rand.Read(value[:]); err != nil {
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
 		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(value[:]), nil
+	return base64.RawURLEncoding.EncodeToString(value), nil
 }
 
 func cloneTransaction(transaction domain.Transaction) domain.Transaction {

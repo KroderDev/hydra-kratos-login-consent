@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.5.3](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.5.2...v0.5.3) (2026-08-30)
+
+
+### Bug Fixes
+
+* **coverage:** remove unneeded changes in crypto/rand helpers to eliminate patch partials ([827e71e](https://github.com/KroderDev/hydra-kratos-login-consent/commit/827e71e6e04dd15b9e675795fe60b3c305e1c73d))
+
+
+### Performance
+
+* comprehensive memory, concurrency, and network optimizations ([7acd62b](https://github.com/KroderDev/hydra-kratos-login-consent/commit/7acd62bf9aa249941971f5e59f3bfa2c8cea62c1))
+* memory, concurrency, and network transport optimizations ([424eff2](https://github.com/KroderDev/hydra-kratos-login-consent/commit/424eff222f89dc9818c95c647172ae6134843e26))
+
+
+### Dependencies
+
+* **deps:** bump github.com/go-chi/chi/v5 in the go-non-major group ([c712417](https://github.com/KroderDev/hydra-kratos-login-consent/commit/c712417d48b05c95d59adc6aa445edee8fe626b3))
+* **deps:** bump redis in the compose-non-major group ([7bfb5f7](https://github.com/KroderDev/hydra-kratos-login-consent/commit/7bfb5f7b7fda13349aaefffcd79ccb4059a7dce4))
+* **deps:** bump the actions-non-major group with 2 updates ([06c2d4e](https://github.com/KroderDev/hydra-kratos-login-consent/commit/06c2d4eb8d7b134cc1c0a86689da9fae30160c13))
+
+
+### Tests
+
+* achieve full patch coverage for server, core service, and query decoding ([eba5e6a](https://github.com/KroderDev/hydra-kratos-login-consent/commit/eba5e6a157509fa22ba24162e2d946ad30dff3af))
+* add unit test coverage for performance optimizations and edge cases ([88d031e](https://github.com/KroderDev/hydra-kratos-login-consent/commit/88d031eadbcb46db6937af2fbba4ba63c95591e6))
+* expand unit test coverage across outbound adapters, config, and main transport ([bf3e23f](https://github.com/KroderDev/hydra-kratos-login-consent/commit/bf3e23fd262b66777c0876cd41fc0f64d95b89a4))
+* full coverage for server run, status recorder, and query decoding ([e4372a8](https://github.com/KroderDev/hydra-kratos-login-consent/commit/e4372a81c9f367d92505d5ec2a2a64aba2afdf6d))
+* maximize patch test coverage across core service, server, and memory state ([a8ad51d](https://github.com/KroderDev/hydra-kratos-login-consent/commit/a8ad51d285c209b4360e6724c72217c4a953efe3))
+* **server:** fix invalid listen address env var in TestRun_InvalidListenAddress ([52ba380](https://github.com/KroderDev/hydra-kratos-login-consent/commit/52ba38091b2b15072ad28fe77af4341584a058d2))
+
 ## [0.5.2](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.5.1...v0.5.2) (2026-08-19)
 
 

@@ -250,3 +250,25 @@ func TestMemoryStore_InvalidHandles(t *testing.T) {
 		t.Fatalf("Get non-existent error = %v, want ErrReplay", err)
 	}
 }
+
+func TestMemoryStore_ZeroMaxEntriesDefaults(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	store := &MemoryStore{
+		now:  func() time.Time { return now },
+		data: make(map[string]domain.Transaction),
+	}
+	handle, err := store.Create(context.Background(), domain.Transaction{
+		Flow:      domain.FlowLogin,
+		Challenge: "c",
+		ClientID:  "client",
+		ExpiresAt: now.Add(time.Minute),
+	})
+	if err != nil || handle == "" {
+		t.Fatalf("Create with zero maxEntries error = %v, handle = %q", err, handle)
+	}
+	if store.maxEntries != defaultMaxEntries {
+		t.Fatalf("maxEntries = %d, want %d", store.maxEntries, defaultMaxEntries)
+	}
+}

@@ -1378,4 +1378,34 @@ func TestFilterClaims_WithIdentityMappings(t *testing.T) {
 	if claims.AccessToken["role"] != "admin" {
 		t.Fatalf("AccessToken claims = %#v, want role", claims.AccessToken)
 	}
+
+	// Empty derived session claims
+	emptyClaims := service.filterClaims(client, domain.Claims{}, domain.Session{}, []string{"openid", "email"})
+	if len(emptyClaims.IDToken) != 0 || len(emptyClaims.AccessToken) != 0 {
+		t.Fatalf("empty derived session claims = %#v", emptyClaims)
+	}
+}
+
+func TestTransactionAdmission_ReservePastTimestamp(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	admission := newTransactionAdmission(10, func() time.Time { return now })
+	if admission.reserve(now.Add(-time.Second)) {
+		t.Fatal("reserve with past timestamp should return false")
+	}
+}
+
+func TestValidateBrowserState_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	if err := validateBrowserState("", "state"); !errors.Is(err, domain.ErrInvalidBrowserState) {
+		t.Fatalf("validateBrowserState empty actual: %v", err)
+	}
+	if err := validateBrowserState("state", ""); !errors.Is(err, domain.ErrInvalidBrowserState) {
+		t.Fatalf("validateBrowserState empty expected: %v", err)
+	}
+	if err := validateBrowserState("actual-state", "expected-state"); !errors.Is(err, domain.ErrInvalidBrowserState) {
+		t.Fatalf("validateBrowserState mismatch: %v", err)
+	}
 }

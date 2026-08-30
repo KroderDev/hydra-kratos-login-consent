@@ -702,3 +702,16 @@ func TestValidateRedirectTarget_Errors(t *testing.T) {
 		})
 	}
 }
+
+func TestServer_AccessLogUnmatchedRoute(t *testing.T) {
+	t.Parallel()
+
+	handler, _, _, _ := newTestHandler(t)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/unmatched/path", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("unmatched path status = %d, want 404", recorder.Code)
+	}
+}

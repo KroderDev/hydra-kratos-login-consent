@@ -294,7 +294,7 @@ func TestRun_InvalidListenAddress(t *testing.T) {
 	t.Setenv("HYDRA_PUBLIC_URL", "https://hydra.example")
 	t.Setenv("KRATOS_PUBLIC_URL", "https://kratos.example")
 	t.Setenv("ALLOWED_CLIENTS", `{"test-client":{"id":"test-client","allowed_redirect_uris":["https://example.com/cb"],"allowed_scopes":["openid"]}}`)
-	t.Setenv("LISTEN_ADDRESS", "999.999.999.999:99999")
+	t.Setenv("LISTEN_ADDR", "127.0.0.1:-1")
 
 	err := run()
 	if err == nil {

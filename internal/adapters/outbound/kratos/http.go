@@ -66,10 +66,11 @@ func (c *Client) ValidateSession(ctx context.Context, credentials ports.SessionC
 	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return domain.Session{}, fmt.Errorf("%w: kratos request failed", domain.ErrUpstream)
+		return domain.Session{}, fmt.Errorf("%w: kratos request failed: %w", domain.ErrUpstream, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		_ = drain(response.Body)
 		return domain.Session{}, domain.ErrUnauthenticated
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
@@ -80,8 +81,10 @@ func (c *Client) ValidateSession(ctx context.Context, credentials ports.SessionC
 	}
 	var payload sessionResponse
 	if err := json.NewDecoder(io.LimitReader(response.Body, maxResponseBytes)).Decode(&payload); err != nil {
+		_ = drain(response.Body)
 		return domain.Session{}, fmt.Errorf("%w: decode kratos response", domain.ErrUpstream)
 	}
+	_ = drain(response.Body)
 	if !payload.Active || payload.Identity.ID == "" {
 		return domain.Session{}, domain.ErrUnauthenticated
 	}
@@ -104,13 +107,14 @@ func (c *Client) Ready(ctx context.Context) error {
 	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return fmt.Errorf("%w: kratos readiness request failed", domain.ErrUpstream)
+		return fmt.Errorf("%w: kratos readiness request failed: %w", domain.ErrUpstream, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		_ = drain(response.Body)
 		return fmt.Errorf("%w: kratos returned readiness status %d", domain.ErrUpstream, response.StatusCode)
 	}
-	return nil
+	return drain(response.Body)
 }
 
 type sessionResponse struct {

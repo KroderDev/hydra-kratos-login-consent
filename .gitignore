@@ -32,6 +32,8 @@
 # Local logs and tooling state
 *.log
 .direnv/
+.claude/
+/scratch/
 
 # Temporary files
 *.swp

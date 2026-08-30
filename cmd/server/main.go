@@ -50,16 +50,18 @@ func run() error {
 	httpClient := &http.Client{
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout:   3 * time.Second,
 				KeepAlive: 30 * time.Second,
 			}).DialContext,
+			ForceAttemptHTTP2:     true,
 			TLSHandshakeTimeout:   3 * time.Second,
 			ResponseHeaderTimeout: 8 * time.Second,
 			IdleConnTimeout:       30 * time.Second,
-			MaxIdleConns:          64,
-			MaxIdleConnsPerHost:   16,
-			MaxConnsPerHost:       64,
+			MaxIdleConns:          256,
+			MaxIdleConnsPerHost:   64,
+			MaxConnsPerHost:       128,
 			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}

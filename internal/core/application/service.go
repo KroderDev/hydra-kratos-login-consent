@@ -766,8 +766,7 @@ func validateOpaqueToken(value string) error {
 		return domain.ErrInvalidBrowserState
 	}
 	var buf [32]byte
-	n, err := base64.RawURLEncoding.Decode(buf[:], []byte(value))
-	if err != nil || n != 32 {
+	if _, err := base64.RawURLEncoding.Decode(buf[:], []byte(value)); err != nil {
 		return domain.ErrInvalidBrowserState
 	}
 	return nil

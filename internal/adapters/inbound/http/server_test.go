@@ -715,3 +715,35 @@ func TestServer_AccessLogUnmatchedRoute(t *testing.T) {
 		t.Fatalf("unmatched path status = %d, want 404", recorder.Code)
 	}
 }
+
+func TestRequiredQueryValue(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		query     url.Values
+		param     string
+		maxLength int
+		wantVal   string
+		wantErr   bool
+	}{
+		{name: "valid", query: url.Values{"q": {"valid"}}, param: "q", maxLength: 10, wantVal: "valid"},
+		{name: "missing param", query: url.Values{}, param: "q", maxLength: 10, wantErr: true},
+		{name: "multiple values", query: url.Values{"q": {"a", "b"}}, param: "q", maxLength: 10, wantErr: true},
+		{name: "empty value", query: url.Values{"q": {"   "}}, param: "q", maxLength: 10, wantErr: true},
+		{name: "exceeds max length", query: url.Values{"q": {"toolongvalue"}}, param: "q", maxLength: 5, wantErr: true},
+		{name: "contains crlf", query: url.Values{"q": {"val\r\nue"}}, param: "q", maxLength: 10, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := requiredQueryValue(tt.query, tt.param, tt.maxLength)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("requiredQueryValue() error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if got != tt.wantVal {
+				t.Fatalf("requiredQueryValue() = %q, want %q", got, tt.wantVal)
+			}
+		})
+	}
+}

@@ -1384,6 +1384,33 @@ func TestFilterClaims_WithIdentityMappings(t *testing.T) {
 	if len(emptyClaims.IDToken) != 0 || len(emptyClaims.AccessToken) != 0 {
 		t.Fatalf("empty derived session claims = %#v", emptyClaims)
 	}
+
+	// IDToken-only allowed
+	clientOnlyID := config.Client{
+		ID:                   "test-client",
+		AllowedIDTokenClaims: map[string][]string{"email": {"openid"}},
+	}
+	claimsID := service.filterClaims(clientOnlyID, domain.Claims{}, session, []string{"openid", "email"})
+	if claimsID.IDToken["email"] != "user@example.com" || len(claimsID.AccessToken) != 0 {
+		t.Fatalf("claimsID = %#v", claimsID)
+	}
+
+	// AccessToken-only allowed
+	clientOnlyAccess := config.Client{
+		ID:                       "test-client",
+		AllowedAccessTokenClaims: map[string][]string{"role": {"openid"}},
+	}
+	claimsAccess := service.filterClaims(clientOnlyAccess, domain.Claims{}, session, []string{"openid", "email"})
+	if claimsAccess.AccessToken["role"] != "admin" || len(claimsAccess.IDToken) != 0 {
+		t.Fatalf("claimsAccess = %#v", claimsAccess)
+	}
+
+	// Neither allowed
+	clientNeither := config.Client{ID: "test-client"}
+	claimsNeither := service.filterClaims(clientNeither, domain.Claims{}, session, []string{"openid", "email"})
+	if len(claimsNeither.IDToken) != 0 || len(claimsNeither.AccessToken) != 0 {
+		t.Fatalf("claimsNeither = %#v", claimsNeither)
+	}
 }
 
 func TestTransactionAdmission_ReservePastTimestamp(t *testing.T) {

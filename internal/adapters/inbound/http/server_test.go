@@ -625,3 +625,80 @@ func TestServer_Security_CRLFHeaderInjection(t *testing.T) {
 		t.Fatalf("CRLF challenge request status = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
 }
+
+func TestStatusRecorder_Unwrap(t *testing.T) {
+	t.Parallel()
+
+	base := httptest.NewRecorder()
+	rec := &statusRecorder{ResponseWriter: base}
+	if rec.Unwrap() != base {
+		t.Fatal("Unwrap did not return base ResponseWriter")
+	}
+}
+
+func TestServer_ReadyFailureReturnsError(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	hydra := &fakeHydra{}
+	kratos := &fakeKratos{}
+	policy := &fakePolicy{}
+	readyFail := &fakeReadinessCheck{err: domain.ErrUpstream}
+
+	service, err := application.NewService(cfg, application.Dependencies{
+		Login:     hydra,
+		Consent:   hydra,
+		Logout:    hydra,
+		Kratos:    kratos,
+		State:     state.NewMemoryStore(time.Now),
+		Policy:    policy,
+		Readiness: []ports.Readiness{readyFail},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	server, err := New(service, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("New Server: %v", err)
+	}
+
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError && recorder.Code != http.StatusBadGateway {
+		t.Fatalf("readyz status = %d, want 500 or 502", recorder.Code)
+	}
+}
+
+type fakeReadinessCheck struct {
+	err error
+}
+
+func (f *fakeReadinessCheck) Ready(context.Context) error {
+	return f.err
+}
+
+func TestValidateRedirectTarget_Errors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		target string
+	}{
+		{name: "empty", target: ""},
+		{name: "relative", target: "/foo/bar"},
+		{name: "javascript", target: "javascript:alert(1)"},
+		{name: "user info", target: "https://user:secret@example.com"}, //nolint:gosec // false positive in test data
+		{name: "fragment", target: "https://example.com/callback#frag"},
+		{name: "crlf", target: "https://example.com\r\nSet-Cookie:evil"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if err := validateRedirectTarget(tt.target); err == nil {
+				t.Fatalf("validateRedirectTarget(%q) expected error", tt.target)
+			}
+		})
+	}
+}

@@ -160,3 +160,48 @@ func TestClient_ReadyMapsFailureToUpstream(t *testing.T) {
 		t.Fatalf("error = %v, want upstream", err)
 	}
 }
+
+func TestClient_ReadySuccess(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health/ready" {
+			t.Fatalf("path = %q, want /health/ready", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer server.Close()
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	client, err := New(baseURL, server.Client())
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	if err := client.Ready(context.Background()); err != nil {
+		t.Fatalf("Ready error = %v, want nil", err)
+	}
+}
+
+func TestClient_ValidateSession403(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"forbidden"}`))
+	}))
+	defer server.Close()
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	client, err := New(baseURL, server.Client())
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	if _, err := client.ValidateSession(context.Background(), ports.SessionCredentials{Token: "token"}); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("error = %v, want ErrUnauthenticated", err)
+	}
+}

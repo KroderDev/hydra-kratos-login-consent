@@ -154,3 +154,99 @@ func TestMemoryStore_ConcurrentConsumeHasOneWinner(t *testing.T) {
 		t.Fatalf("successful consumes = %d, want 1", winners)
 	}
 }
+
+func TestMemoryStore_EvictsExpiredWhenCapacityReached(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	store := NewMemoryStore(func() time.Time { return now })
+	store.maxEntries = 2
+
+	// Fill store with 2 entries, 1 will expire
+	h1, err := store.Create(context.Background(), domain.Transaction{
+		Flow:      domain.FlowLogin,
+		Challenge: "c1",
+		ClientID:  "client",
+		ExpiresAt: now.Add(10 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("create c1: %v", err)
+	}
+	_, err = store.Create(context.Background(), domain.Transaction{
+		Flow:      domain.FlowLogin,
+		Challenge: "c2",
+		ClientID:  "client",
+		ExpiresAt: now.Add(10 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("create c2: %v", err)
+	}
+
+	// Advance clock so c1 expires
+	now = now.Add(20 * time.Second)
+
+	// Creating a 3rd entry triggers removal of expired c1 and succeeds
+	h3, err := store.Create(context.Background(), domain.Transaction{
+		Flow:      domain.FlowLogin,
+		Challenge: "c3",
+		ClientID:  "client",
+		ExpiresAt: now.Add(10 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("create c3: %v", err)
+	}
+	if h3 == "" {
+		t.Fatal("expected non-empty handle for c3")
+	}
+
+	// Verify c1 was removed
+	if _, err := store.Get(context.Background(), h1); !errors.Is(err, domain.ErrReplay) {
+		t.Fatalf("c1 error = %v, want replay (deleted)", err)
+	}
+}
+
+func TestMemoryStore_RejectsWhenFullAndNoExpired(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	store := NewMemoryStore(func() time.Time { return now })
+	store.maxEntries = 2
+
+	for i := range 2 {
+		_, err := store.Create(context.Background(), domain.Transaction{
+			Flow:      domain.FlowLogin,
+			Challenge: "c",
+			ClientID:  "client",
+			ExpiresAt: now.Add(10 * time.Minute),
+		})
+		if err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+	}
+
+	// 3rd entry when none are expired should fail with ErrUpstream
+	_, err := store.Create(context.Background(), domain.Transaction{
+		Flow:      domain.FlowLogin,
+		Challenge: "c3",
+		ClientID:  "client",
+		ExpiresAt: now.Add(10 * time.Minute),
+	})
+	if !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("create full error = %v, want upstream", err)
+	}
+}
+
+func TestMemoryStore_InvalidHandles(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(nil)
+	if _, err := store.Get(context.Background(), ""); !errors.Is(err, domain.ErrInvalidTransaction) {
+		t.Fatalf("Get empty handle error = %v, want ErrInvalidTransaction", err)
+	}
+	if _, err := store.Consume(context.Background(), ""); !errors.Is(err, domain.ErrInvalidTransaction) {
+		t.Fatalf("Consume empty handle error = %v, want ErrInvalidTransaction", err)
+	}
+	if _, err := store.Get(context.Background(), "non-existent"); !errors.Is(err, domain.ErrReplay) {
+		t.Fatalf("Get non-existent error = %v, want ErrReplay", err)
+	}
+}

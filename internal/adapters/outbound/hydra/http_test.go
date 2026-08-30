@@ -211,6 +211,42 @@ func TestPostLogoutRedirectRejectsDuplicateValues(t *testing.T) {
 	}
 }
 
+func TestClient_RejectionsAndAcceptLogout(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/admin/oauth2/auth/requests/login/reject",
+			"/admin/oauth2/auth/requests/consent/reject",
+			"/admin/oauth2/auth/requests/logout/reject",
+			"/admin/oauth2/auth/requests/logout/accept":
+			writeJSON(t, w, map[string]string{"redirect_to": "https://hydra.example/callback"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	client, err := New(baseURL, server.Client(), "")
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+
+	rejection := ports.Rejection{Error: "access_denied", ErrorDescription: "denied"}
+	if redirect, err := client.RejectLogin(context.Background(), "c", rejection); err != nil || redirect != "https://hydra.example/callback" {
+		t.Fatalf("RejectLogin error = %v, redirect = %q", err, redirect)
+	}
+	if redirect, err := client.RejectConsent(context.Background(), "c", rejection); err != nil || redirect != "https://hydra.example/callback" {
+		t.Fatalf("RejectConsent error = %v, redirect = %q", err, redirect)
+	}
+	if _, err := client.RejectLogout(context.Background(), "c", rejection); err != nil {
+		t.Fatalf("RejectLogout error = %v", err)
+	}
+	if redirect, err := client.AcceptLogout(context.Background(), "c"); err != nil || redirect != "https://hydra.example/callback" {
+		t.Fatalf("AcceptLogout error = %v, redirect = %q", err, redirect)
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, value any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")

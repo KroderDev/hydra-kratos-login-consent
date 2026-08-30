@@ -483,7 +483,6 @@ func (s *Service) acceptConsentDecision(ctx context.Context, request domain.Cons
 }
 
 func (s *Service) filterClaims(client config.Client, claims domain.Claims, session domain.Session, scopes []string) domain.Claims {
-	identityClaims := s.cfg.OIDCIdentityClaimMappings.Derive(session, s.cfg.IsSecureEnvironment())
 	result := domain.Claims{
 		IDToken: filterClaimMap(
 			claims.IDToken,
@@ -498,16 +497,22 @@ func (s *Service) filterClaims(client config.Client, claims domain.Claims, sessi
 			s.cfg.OIDCIdentityClaimMappings,
 		),
 	}
-	result.IDToken = mergeClaims(result.IDToken, filterIdentityClaimMap(
-		identityClaims,
-		client.AllowedIDTokenClaims,
-		scopes,
-	))
-	result.AccessToken = mergeClaims(result.AccessToken, filterIdentityClaimMap(
-		identityClaims,
-		client.AllowedAccessTokenClaims,
-		scopes,
-	))
+	if len(s.cfg.OIDCIdentityClaimMappings) > 0 &&
+		(len(client.AllowedIDTokenClaims) > 0 || len(client.AllowedAccessTokenClaims) > 0) {
+		identityClaims := s.cfg.OIDCIdentityClaimMappings.Derive(session, s.cfg.IsSecureEnvironment())
+		if len(identityClaims) > 0 {
+			result.IDToken = mergeClaims(result.IDToken, filterIdentityClaimMap(
+				identityClaims,
+				client.AllowedIDTokenClaims,
+				scopes,
+			))
+			result.AccessToken = mergeClaims(result.AccessToken, filterIdentityClaimMap(
+				identityClaims,
+				client.AllowedAccessTokenClaims,
+				scopes,
+			))
+		}
+	}
 	return result
 }
 
@@ -757,8 +762,11 @@ func validateBrowserState(actual, expected string) error {
 }
 
 func validateOpaqueToken(value string) error {
-	decoded, err := base64.RawURLEncoding.DecodeString(value)
-	if err != nil || len(decoded) != 32 {
+	if len(value) != 43 {
+		return domain.ErrInvalidBrowserState
+	}
+	var buf [32]byte
+	if _, err := base64.RawURLEncoding.Decode(buf[:], []byte(value)); err != nil {
 		return domain.ErrInvalidBrowserState
 	}
 	return nil
@@ -790,11 +798,17 @@ func newTransactionAdmission(maxPending int, now func() time.Time) *transactionA
 }
 
 func (a *transactionAdmission) reserve(expiresAt time.Time) bool {
+	now := a.now()
+	if !expiresAt.After(now) {
+		return false
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.removeExpiredLocked()
-	if !expiresAt.After(a.now()) || len(a.active)+a.reserved >= a.max {
-		return false
+	if len(a.active)+a.reserved >= a.max {
+		a.removeExpiredLocked(now)
+		if len(a.active)+a.reserved >= a.max {
+			return false
+		}
 	}
 	a.reserved++
 	return true
@@ -823,8 +837,7 @@ func (a *transactionAdmission) release(handle string) {
 	delete(a.active, handle)
 }
 
-func (a *transactionAdmission) removeExpiredLocked() {
-	now := a.now()
+func (a *transactionAdmission) removeExpiredLocked(now time.Time) {
 	for handle, expiresAt := range a.active {
 		if !expiresAt.After(now) {
 			delete(a.active, handle)

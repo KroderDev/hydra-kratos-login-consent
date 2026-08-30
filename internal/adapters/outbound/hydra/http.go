@@ -193,7 +193,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return fmt.Errorf("%w: hydra request failed", domain.ErrUpstream)
+		return fmt.Errorf("%w: hydra request failed: %w", domain.ErrUpstream, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
@@ -203,13 +203,14 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 		return fmt.Errorf("%w: hydra returned status %d", domain.ErrUpstream, response.StatusCode)
 	}
 	if output == nil {
-		return nil
+		return drain(response.Body)
 	}
 	decoder := json.NewDecoder(io.LimitReader(response.Body, maxResponseBytes))
 	if err := decoder.Decode(output); err != nil {
+		_ = drain(response.Body)
 		return fmt.Errorf("%w: decode hydra response", domain.ErrUpstream)
 	}
-	return nil
+	return drain(response.Body)
 }
 
 func drain(body io.Reader) error {

@@ -160,3 +160,97 @@ func TestClient_ReadyMapsFailureToUpstream(t *testing.T) {
 		t.Fatalf("error = %v, want upstream", err)
 	}
 }
+
+func TestClient_ReadySuccess(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health/ready" {
+			t.Fatalf("path = %q, want /health/ready", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer server.Close()
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	client, err := New(baseURL, server.Client())
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	if err := client.Ready(context.Background()); err != nil {
+		t.Fatalf("Ready error = %v, want nil", err)
+	}
+}
+
+func TestClient_ValidateSession403(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"forbidden"}`))
+	}))
+	defer server.Close()
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	client, err := New(baseURL, server.Client())
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	if _, err := client.ValidateSession(context.Background(), ports.SessionCredentials{Token: "token"}); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("error = %v, want ErrUnauthenticated", err)
+	}
+}
+
+func TestClient_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	// New with invalid URLs
+	if _, err := New(nil, nil); err == nil {
+		t.Fatal("New(nil, nil) expected error")
+	}
+	if _, err := New(&url.URL{Path: "/foo"}, nil); err == nil {
+		t.Fatal("New without Scheme/Host expected error")
+	}
+
+	// 500 status from Kratos
+	server500 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal error"))
+	}))
+	defer server500.Close()
+	baseURL500, _ := url.Parse(server500.URL)
+	client500, _ := New(baseURL500, server500.Client())
+	if _, err := client500.ValidateSession(context.Background(), ports.SessionCredentials{Token: "tok"}); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("500 status error = %v, want ErrUpstream", err)
+	}
+
+	// Malformed JSON response
+	serverBadJSON := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{malformed"))
+	}))
+	defer serverBadJSON.Close()
+	baseURLBadJSON, _ := url.Parse(serverBadJSON.URL)
+	clientBadJSON, _ := New(baseURLBadJSON, serverBadJSON.Client())
+	if _, err := clientBadJSON.ValidateSession(context.Background(), ports.SessionCredentials{Token: "tok"}); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("bad json error = %v, want ErrUpstream", err)
+	}
+
+	// Network failure (server closed)
+	serverClosed := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	baseURLClosed, _ := url.Parse(serverClosed.URL)
+	clientClosed, _ := New(baseURLClosed, serverClosed.Client())
+	serverClosed.Close()
+
+	if _, err := clientClosed.ValidateSession(context.Background(), ports.SessionCredentials{Token: "tok"}); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("network failure ValidateSession error = %v, want ErrUpstream", err)
+	}
+	if err := clientClosed.Ready(context.Background()); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("network failure Ready error = %v, want ErrUpstream", err)
+	}
+}

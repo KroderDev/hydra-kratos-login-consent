@@ -91,7 +91,7 @@ func (c *HTTP) authorize(ctx context.Context, operation string, input ports.Poli
 	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return ports.ConsentDecision{}, fmt.Errorf("%w: policy request failed", domain.ErrUpstream)
+		return ports.ConsentDecision{}, fmt.Errorf("%w: policy request failed: %w", domain.ErrUpstream, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {

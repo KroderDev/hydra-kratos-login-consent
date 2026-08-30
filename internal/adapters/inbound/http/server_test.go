@@ -625,3 +625,174 @@ func TestServer_Security_CRLFHeaderInjection(t *testing.T) {
 		t.Fatalf("CRLF challenge request status = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
 }
+
+func TestStatusRecorder_Unwrap(t *testing.T) {
+	t.Parallel()
+
+	base := httptest.NewRecorder()
+	rec := &statusRecorder{ResponseWriter: base}
+	if rec.Unwrap() != base {
+		t.Fatal("Unwrap did not return base ResponseWriter")
+	}
+}
+
+func TestServer_ReadyFailureReturnsError(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	hydra := &fakeHydra{}
+	kratos := &fakeKratos{}
+	policy := &fakePolicy{}
+	readyFail := &fakeReadinessCheck{err: domain.ErrUpstream}
+
+	service, err := application.NewService(cfg, application.Dependencies{
+		Login:     hydra,
+		Consent:   hydra,
+		Logout:    hydra,
+		Kratos:    kratos,
+		State:     state.NewMemoryStore(time.Now),
+		Policy:    policy,
+		Readiness: []ports.Readiness{readyFail},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	server, err := New(service, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("New Server: %v", err)
+	}
+
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/readyz", nil)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError && recorder.Code != http.StatusBadGateway {
+		t.Fatalf("readyz status = %d, want 500 or 502", recorder.Code)
+	}
+}
+
+type fakeReadinessCheck struct {
+	err error
+}
+
+func (f *fakeReadinessCheck) Ready(context.Context) error {
+	return f.err
+}
+
+func TestValidateRedirectTarget_Errors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		target string
+	}{
+		{name: "empty", target: ""},
+		{name: "relative", target: "/foo/bar"},
+		{name: "javascript", target: "javascript:alert(1)"},
+		{name: "user info", target: "https://user:secret@example.com"}, //nolint:gosec // false positive in test data
+		{name: "fragment", target: "https://example.com/callback#frag"},
+		{name: "crlf", target: "https://example.com\r\nSet-Cookie:evil"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if err := validateRedirectTarget(tt.target); err == nil {
+				t.Fatalf("validateRedirectTarget(%q) expected error", tt.target)
+			}
+		})
+	}
+}
+
+func TestServer_AccessLogUnmatchedRoute(t *testing.T) {
+	t.Parallel()
+
+	handler, _, _, _ := newTestHandler(t)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/unmatched/path", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("unmatched path status = %d, want 404", recorder.Code)
+	}
+}
+
+func TestRequiredQueryValue(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		query     url.Values
+		param     string
+		maxLength int
+		wantVal   string
+		wantErr   bool
+	}{
+		{name: "valid", query: url.Values{"q": {"valid"}}, param: "q", maxLength: 10, wantVal: "valid"},
+		{name: "missing param", query: url.Values{}, param: "q", maxLength: 10, wantErr: true},
+		{name: "multiple values", query: url.Values{"q": {"a", "b"}}, param: "q", maxLength: 10, wantErr: true},
+		{name: "empty value", query: url.Values{"q": {"   "}}, param: "q", maxLength: 10, wantErr: true},
+		{name: "exceeds max length", query: url.Values{"q": {"toolongvalue"}}, param: "q", maxLength: 5, wantErr: true},
+		{name: "contains crlf", query: url.Values{"q": {"val\r\nue"}}, param: "q", maxLength: 10, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := requiredQueryValue(tt.query, tt.param, tt.maxLength)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("requiredQueryValue() error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if got != tt.wantVal {
+				t.Fatalf("requiredQueryValue() = %q, want %q", got, tt.wantVal)
+			}
+		})
+	}
+}
+
+func TestStatusRecorder_WriteDefaultsToStatusOK(t *testing.T) {
+	t.Parallel()
+
+	base := httptest.NewRecorder()
+	rec := &statusRecorder{ResponseWriter: base}
+	_, _ = rec.Write([]byte("hello"))
+	if rec.status != http.StatusOK {
+		t.Fatalf("rec.status = %d, want 200", rec.status)
+	}
+}
+
+func TestServer_HandlerQueryErrors(t *testing.T) {
+	t.Parallel()
+
+	handler, _, _, _ := newTestHandler(t)
+
+	// Missing transaction in callback
+	req1 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/login/callback?csrf=tok", nil)
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusBadRequest {
+		t.Fatalf("missing transaction status = %d, want 400", rec1.Code)
+	}
+
+	// Missing csrf in callback
+	req2 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/login/callback?transaction=tx", nil)
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusBadRequest {
+		t.Fatalf("missing csrf status = %d, want 400", rec2.Code)
+	}
+
+	// Missing challenge in consent
+	req3 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/consent", nil)
+	rec3 := httptest.NewRecorder()
+	handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusBadRequest {
+		t.Fatalf("missing consent challenge status = %d, want 400", rec3.Code)
+	}
+
+	// Missing challenge in logout
+	req4 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/logout", nil)
+	rec4 := httptest.NewRecorder()
+	handler.ServeHTTP(rec4, req4)
+	if rec4.Code != http.StatusBadRequest {
+		t.Fatalf("missing logout challenge status = %d, want 400", rec4.Code)
+	}
+}

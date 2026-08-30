@@ -30,11 +30,12 @@ const (
 // Mapping describes one derived claim. Sources are exact RFC 6901 JSON
 // Pointers into the sanitized Kratos source document.
 type Mapping struct {
-	Source    string   `json:"source,omitempty"`
-	Sources   []string `json:"sources,omitempty"`
-	Transform string   `json:"transform,omitempty"`
-	Type      string   `json:"type"`
-	Format    string   `json:"format,omitempty"`
+	Source        string   `json:"source,omitempty"`
+	Sources       []string `json:"sources,omitempty"`
+	Transform     string   `json:"transform,omitempty"`
+	Type          string   `json:"type"`
+	Format        string   `json:"format,omitempty"`
+	parsedSources [][]string
 }
 
 // ClaimMappings is keyed by the output claim name.
@@ -90,9 +91,13 @@ func (m ClaimMappings) Validate(_ bool) error {
 		if IsReservedClaim(name) {
 			return fmt.Errorf("identity claim %q is reserved by OAuth or OIDC", name)
 		}
-		if err := validateMapping(name, m[name]); err != nil {
+		mapping := m[name]
+		parsedTokens, err := validateMapping(name, mapping)
+		if err != nil {
 			return fmt.Errorf("identity claim %q: %w", name, err)
 		}
+		mapping.parsedSources = parsedTokens
+		m[name] = mapping
 	}
 	return nil
 }
@@ -105,14 +110,8 @@ func (m ClaimMappings) Derive(session domain.Session, secureEnvironment bool) ma
 		return nil
 	}
 	document := sourceDocument(session)
-	claimNames := make([]string, 0, len(m))
-	for name := range m {
-		claimNames = append(claimNames, name)
-	}
-	sort.Strings(claimNames)
 	claims := make(map[string]any, len(m))
-	for _, name := range claimNames {
-		mapping := m[name]
+	for name, mapping := range m {
 		value, ok := mappingValue(document, mapping)
 		if !ok || !validClaimValue(name, mapping, value, secureEnvironment) {
 			continue
@@ -160,53 +159,55 @@ func validateClaimName(name string) error {
 }
 
 // validateMapping validates the source pointers, transformation, type, format, and standard-claim requirements for a claim mapping.
-func validateMapping(name string, mapping Mapping) error {
+func validateMapping(name string, mapping Mapping) ([][]string, error) {
 	sources, err := mappingSources(mapping)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(sources) > maxSources {
-		return fmt.Errorf("has more than %d sources", maxSources)
+		return nil, fmt.Errorf("has more than %d sources", maxSources)
 	}
+	parsedTokens := make([][]string, 0, len(sources))
 	for _, source := range sources {
 		if len(source) > maxPointerBytes {
-			return fmt.Errorf("source pointer exceeds %d bytes", maxPointerBytes)
+			return nil, fmt.Errorf("source pointer exceeds %d bytes", maxPointerBytes)
 		}
 		tokens, err := parsePointer(source)
 		if err != nil {
-			return fmt.Errorf("source %q: %w", source, err)
+			return nil, fmt.Errorf("source %q: %w", source, err)
 		}
 		if len(tokens) < 2 || (tokens[0] != "traits" && tokens[0] != "metadata_public") {
-			return fmt.Errorf("source %q must select a value below /traits or /metadata_public", source)
+			return nil, fmt.Errorf("source %q must select a value below /traits or /metadata_public", source)
 		}
 		if len(tokens) > maxPointerTokens {
-			return fmt.Errorf("source %q has more than %d pointer tokens", source, maxPointerTokens)
+			return nil, fmt.Errorf("source %q has more than %d pointer tokens", source, maxPointerTokens)
 		}
 		for _, token := range tokens {
 			if strings.ContainsAny(token, "*[]{}$") {
-				return fmt.Errorf("source %q must not contain wildcard selectors", source)
+				return nil, fmt.Errorf("source %q must not contain wildcard selectors", source)
 			}
 		}
+		parsedTokens = append(parsedTokens, tokens)
 	}
 	if len(sources) > 1 && mapping.Transform != TransformJoinSpace {
-		return fmt.Errorf("multiple sources require transform %q", TransformJoinSpace)
+		return nil, fmt.Errorf("multiple sources require transform %q", TransformJoinSpace)
 	}
 	if mapping.Transform != "" && mapping.Transform != TransformJoinSpace {
-		return fmt.Errorf("unsupported transform %q", mapping.Transform)
+		return nil, fmt.Errorf("unsupported transform %q", mapping.Transform)
 	}
 	if mapping.Transform == TransformJoinSpace && mapping.Type != "string" {
-		return fmt.Errorf("transform %q requires type string", TransformJoinSpace)
+		return nil, fmt.Errorf("transform %q requires type string", TransformJoinSpace)
 	}
 	if !validType(mapping.Type) {
-		return fmt.Errorf("unsupported type %q", mapping.Type)
+		return nil, fmt.Errorf("unsupported type %q", mapping.Type)
 	}
 	if !validFormat(mapping.Type, mapping.Format) {
-		return fmt.Errorf("unsupported format %q for type %q", mapping.Format, mapping.Type)
+		return nil, fmt.Errorf("unsupported format %q for type %q", mapping.Format, mapping.Type)
 	}
 	if err := validateStandardMapping(name, mapping); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return parsedTokens, nil
 }
 
 // mappingSources returns the mapping's configured source pointers and validates their uniqueness and presence. It returns an error if the mapping defines both source forms, neither form, an empty pointer, or duplicate pointers.
@@ -303,14 +304,25 @@ func validFormat(valueType, format string) bool {
 // String values are trimmed, and join-space mappings combine non-empty string sources with spaces.
 // The boolean is false when the value is missing, empty, or incompatible with the mapping transform.
 func mappingValue(document map[string]any, mapping Mapping) (any, bool) {
-	sources, err := mappingSources(mapping)
-	if err != nil {
-		return nil, false
+	parsedSources := mapping.parsedSources
+	if len(parsedSources) == 0 {
+		sources, err := mappingSources(mapping)
+		if err != nil {
+			return nil, false
+		}
+		parsedSources = make([][]string, 0, len(sources))
+		for _, source := range sources {
+			tokens, err := parsePointer(source)
+			if err != nil {
+				return nil, false
+			}
+			parsedSources = append(parsedSources, tokens)
+		}
 	}
 	if mapping.Transform == TransformJoinSpace {
-		parts := make([]string, 0, len(sources))
-		for _, source := range sources {
-			value, ok := resolvePointer(document, source)
+		parts := make([]string, 0, len(parsedSources))
+		for _, tokens := range parsedSources {
+			value, ok := resolvePointerTokens(document, tokens)
 			if !ok || value == nil {
 				continue
 			}
@@ -328,7 +340,7 @@ func mappingValue(document map[string]any, mapping Mapping) (any, bool) {
 		}
 		return strings.Join(parts, " "), true
 	}
-	value, ok := resolvePointer(document, sources[0])
+	value, ok := resolvePointerTokens(document, parsedSources[0])
 	if !ok || value == nil {
 		return nil, false
 	}
@@ -440,21 +452,16 @@ func isInteger(value any) bool {
 	}
 }
 
-// sourceDocument builds a source document containing cloned identity traits and public metadata.
+// sourceDocument builds a source document containing identity traits and public metadata.
 func sourceDocument(session domain.Session) map[string]any {
 	return map[string]any{
-		"traits":          cloneJSONValue(session.IdentityTraits),
-		"metadata_public": cloneJSONValue(session.IdentityMetadataPublic),
+		"traits":          session.IdentityTraits,
+		"metadata_public": session.IdentityMetadataPublic,
 	}
 }
 
-// resolvePointer retrieves the value at an RFC 6901 JSON Pointer within a document.
-// It returns the value and true when the pointer resolves successfully, or nil and false otherwise.
-func resolvePointer(document any, pointer string) (any, bool) {
-	tokens, err := parsePointer(pointer)
-	if err != nil {
-		return nil, false
-	}
+// resolvePointerTokens retrieves the value at pre-parsed RFC 6901 JSON Pointer tokens within a document.
+func resolvePointerTokens(document any, tokens []string) (any, bool) {
 	current := document
 	for _, token := range tokens {
 		switch value := current.(type) {
@@ -475,6 +482,16 @@ func resolvePointer(document any, pointer string) (any, bool) {
 		}
 	}
 	return current, true
+}
+
+// resolvePointer retrieves the value at an RFC 6901 JSON Pointer within a document.
+// It returns the value and true when the pointer resolves successfully, or nil and false otherwise.
+func resolvePointer(document any, pointer string) (any, bool) {
+	tokens, err := parsePointer(pointer)
+	if err != nil {
+		return nil, false
+	}
+	return resolvePointerTokens(document, tokens)
 }
 
 // parsePointer parses an RFC 6901 JSON pointer into its unescaped tokens. Empty

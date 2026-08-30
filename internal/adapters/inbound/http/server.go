@@ -86,7 +86,8 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	challenge, err := requiredQuery(r, "login_challenge", s.cfg.EffectiveMaxChallengeLength())
+	query := r.URL.Query()
+	challenge, err := requiredQueryValue(query, "login_challenge", s.cfg.EffectiveMaxChallengeLength())
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -103,17 +104,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLoginCallback(w http.ResponseWriter, r *http.Request) {
-	transaction, err := requiredQuery(r, "transaction", 256)
+	query := r.URL.Query()
+	transaction, err := requiredQueryValue(query, "transaction", 256)
 	if err != nil {
 		s.writeError(w, r, err)
 		return
 	}
-	csrfToken, err := requiredQuery(r, "csrf", 256)
+	csrfToken, err := requiredQueryValue(query, "csrf", 256)
 	if err != nil {
 		s.writeError(w, r, err)
 		return
 	}
-	remember, rememberFor, err := rememberOptions(r.URL.Query().Get("remember"), r.URL.Query().Get("remember_for"))
+	remember, rememberFor, err := rememberOptions(query.Get("remember"), query.Get("remember_for"))
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -133,7 +135,8 @@ func (s *Server) handleLoginCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConsent(w http.ResponseWriter, r *http.Request) {
-	challenge, err := requiredQuery(r, "consent_challenge", s.cfg.EffectiveMaxChallengeLength())
+	query := r.URL.Query()
+	challenge, err := requiredQueryValue(query, "consent_challenge", s.cfg.EffectiveMaxChallengeLength())
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -186,7 +189,8 @@ func (s *Server) handleConsentSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	challenge, err := requiredQuery(r, "logout_challenge", s.cfg.EffectiveMaxChallengeLength())
+	query := r.URL.Query()
+	challenge, err := requiredQueryValue(query, "logout_challenge", s.cfg.EffectiveMaxChallengeLength())
 	if err != nil {
 		s.writeError(w, r, err)
 		return
@@ -309,12 +313,12 @@ func (s *Server) accessLog(next http.Handler) http.Handler {
 		if pattern := chi.RouteContext(r.Context()).RoutePattern(); pattern != "" {
 			route = pattern
 		}
-		s.logger.InfoContext(r.Context(), "http request",
-			"request_id", requestID(r.Context()),
-			"method", r.Method,
-			"route", route,
-			"status", recorder.status,
-			"duration_ms", time.Since(started).Milliseconds(),
+		s.logger.LogAttrs(r.Context(), slog.LevelInfo, "http request",
+			slog.String("request_id", requestID(r.Context())),
+			slog.String("method", r.Method),
+			slog.String("route", route),
+			slog.Int("status", recorder.status),
+			slog.Int64("duration_ms", time.Since(started).Milliseconds()),
 		)
 	})
 }
@@ -374,6 +378,10 @@ type statusRecorder struct {
 	status int
 }
 
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
 func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
@@ -386,8 +394,8 @@ func (r *statusRecorder) Write(body []byte) (int, error) {
 	return r.ResponseWriter.Write(body)
 }
 
-func requiredQuery(r *http.Request, name string, maxLength int) (string, error) {
-	values, ok := r.URL.Query()[name]
+func requiredQueryValue(query url.Values, name string, maxLength int) (string, error) {
+	values, ok := query[name]
 	if !ok || len(values) != 1 {
 		return "", domain.ErrInvalidChallenge
 	}

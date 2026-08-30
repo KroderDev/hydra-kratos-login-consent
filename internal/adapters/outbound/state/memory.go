@@ -16,7 +16,7 @@ const defaultMaxEntries = 10_000
 
 // MemoryStore provides bounded, single-use transaction state for local use.
 type MemoryStore struct {
-	mu         sync.Mutex
+	mu         sync.RWMutex
 	now        func() time.Time
 	maxEntries int
 	data       map[string]domain.Transaction
@@ -38,7 +38,8 @@ func NewMemoryStore(now func() time.Time) *MemoryStore {
 
 // Create stores transaction with a cryptographically random opaque handle.
 func (s *MemoryStore) Create(_ context.Context, transaction domain.Transaction) (string, error) {
-	if transaction.ExpiresAt.IsZero() || !transaction.ExpiresAt.After(s.now()) {
+	now := s.now()
+	if transaction.ExpiresAt.IsZero() || !transaction.ExpiresAt.After(now) {
 		return "", domain.ErrExpiredTransaction
 	}
 	for range 3 {
@@ -47,13 +48,15 @@ func (s *MemoryStore) Create(_ context.Context, transaction domain.Transaction) 
 			return "", err
 		}
 		s.mu.Lock()
-		s.removeExpiredLocked()
 		if s.maxEntries <= 0 {
 			s.maxEntries = defaultMaxEntries
 		}
 		if len(s.data) >= s.maxEntries {
-			s.mu.Unlock()
-			return "", domain.ErrUpstream
+			s.removeExpiredLocked(now)
+			if len(s.data) >= s.maxEntries {
+				s.mu.Unlock()
+				return "", domain.ErrUpstream
+			}
 		}
 		if _, exists := s.data[handle]; !exists {
 			s.data[handle] = cloneTransaction(transaction)
@@ -65,8 +68,7 @@ func (s *MemoryStore) Create(_ context.Context, transaction domain.Transaction) 
 	return "", domain.ErrUpstream
 }
 
-func (s *MemoryStore) removeExpiredLocked() {
-	now := s.now()
+func (s *MemoryStore) removeExpiredLocked(now time.Time) {
 	for handle, transaction := range s.data {
 		if !transaction.ExpiresAt.After(now) {
 			delete(s.data, handle)
@@ -79,9 +81,9 @@ func (s *MemoryStore) Get(_ context.Context, handle string) (domain.Transaction,
 	if handle == "" {
 		return domain.Transaction{}, domain.ErrInvalidTransaction
 	}
-	s.mu.Lock()
+	s.mu.RLock()
 	transaction, exists := s.data[handle]
-	s.mu.Unlock()
+	s.mu.RUnlock()
 	if !exists {
 		return domain.Transaction{}, domain.ErrReplay
 	}

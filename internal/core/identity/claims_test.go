@@ -1,6 +1,8 @@
 package identity
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
 	"reflect"
 	"strings"
@@ -651,4 +653,107 @@ func float32NaN() float32 {
 
 func float32Inf() float32 {
 	return float32(math.Inf(1))
+}
+
+func TestMappingValue_UnparsedFallbackAndEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	doc := map[string]any{
+		"traits": map[string]any{
+			"first": "John",
+			"last":  "Doe",
+			"tags":  []any{"admin", "user"},
+		},
+	}
+
+	// Unparsed mapping (parsedSources is nil)
+	mSingle := Mapping{Source: "/traits/first", Type: "string"}
+	val, ok := mappingValue(doc, mSingle)
+	if !ok || val != "John" {
+		t.Fatalf("mappingValue unparsed single: val = %#v, ok = %t", val, ok)
+	}
+
+	// Unparsed join_space mapping
+	mJoin := Mapping{Sources: []string{"/traits/first", "/traits/last"}, Type: "string", Transform: TransformJoinSpace}
+	val, ok = mappingValue(doc, mJoin)
+	if !ok || val != "John Doe" {
+		t.Fatalf("mappingValue unparsed join_space: val = %#v, ok = %t", val, ok)
+	}
+
+	// Array pointer resolution
+	vArray, ok := resolvePointer(doc, "/traits/tags/0")
+	if !ok || vArray != "admin" {
+		t.Fatalf("resolvePointer array index 0: val = %#v, ok = %t", vArray, ok)
+	}
+
+	// Array pointer out of bounds
+	if _, ok := resolvePointer(doc, "/traits/tags/99"); ok {
+		t.Fatal("resolvePointer array out of bounds expected false")
+	}
+
+	// Invalid array pointer (non-integer token)
+	if _, ok := resolvePointer(doc, "/traits/tags/invalid"); ok {
+		t.Fatal("resolvePointer invalid array index token expected false")
+	}
+
+	// Invalid pointer format
+	if _, ok := resolvePointer(doc, "invalid-pointer"); ok {
+		t.Fatal("resolvePointer invalid pointer syntax expected false")
+	}
+
+	// Non-existent key
+	if _, ok := resolvePointer(doc, "/traits/not_found"); ok {
+		t.Fatal("resolvePointer not found key expected false")
+	}
+
+	// Invalid mapping sources in mappingValue
+	if _, ok := mappingValue(doc, Mapping{}); ok {
+		t.Fatal("mappingValue with empty source expected false")
+	}
+
+	// Invalid pointer parsing in mappingValue fallback
+	if _, ok := mappingValue(doc, Mapping{Source: "invalid"}); ok {
+		t.Fatal("mappingValue with invalid pointer source expected false")
+	}
+}
+
+func TestClaimMappings_MaxLimitsAndJsonNumbers(t *testing.T) {
+	t.Parallel()
+
+	// Exceed max mappings (maxMappings is 64)
+	largeMappings := make(ClaimMappings)
+	for i := range 65 {
+		largeMappings[fmt.Sprintf("claim_%d", i)] = Mapping{Source: "/traits/a", Type: "string"}
+	}
+	if err := largeMappings.Validate(false); err == nil {
+		t.Fatal("Validate should fail when exceeding maxMappings")
+	}
+
+	// Exceed max pointer bytes (maxPointerBytes is 512)
+	longSource := "/traits/" + strings.Repeat("a", 513)
+	mLong := ClaimMappings{"long": {Source: longSource, Type: "string"}}
+	if err := mLong.Validate(false); err == nil {
+		t.Fatal("Validate should fail when pointer exceeds maxPointerBytes")
+	}
+
+	// Exceed max pointer tokens (16 tokens max)
+	manyTokensSource := "/traits" + strings.Repeat("/a", 17)
+	mTokens := ClaimMappings{"tokens": {Source: manyTokensSource, Type: "string"}}
+	if err := mTokens.Validate(false); err == nil {
+		t.Fatal("Validate should fail when pointer exceeds maxPointerTokens")
+	}
+
+	// json.Number in isNumber and isInteger
+	if !isNumber(json.Number("123.45")) {
+		t.Fatal("isNumber(json.Number(123.45)) should be true")
+	}
+	if isNumber(json.Number("invalid")) {
+		t.Fatal("isNumber(json.Number(invalid)) should be false")
+	}
+	if !isInteger(json.Number("123")) {
+		t.Fatal("isInteger(json.Number(123)) should be true")
+	}
+	if isInteger(json.Number("123.45")) {
+		t.Fatal("isInteger(json.Number(123.45)) should be false")
+	}
 }

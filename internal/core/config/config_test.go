@@ -80,6 +80,26 @@ func TestConfigExternalConsentRedirect(t *testing.T) {
 	if got := parsed.Query().Get("scope"); got != "openid profile" {
 		t.Fatalf("scope = %q, want openid profile", got)
 	}
+
+	if _, err := cfg.ExternalConsentRedirect("", "csrf", "Client", nil); !errors.Is(err, domain.ErrInvalidTransaction) {
+		t.Fatalf("empty transaction error = %v, want invalid transaction", err)
+	}
+	if _, err := cfg.ExternalConsentRedirect("tx", "", "Client", nil); !errors.Is(err, domain.ErrInvalidTransaction) {
+		t.Fatalf("empty csrf error = %v, want invalid transaction", err)
+	}
+
+	client, ok := cfg.Client("example-client")
+	if !ok || client.ID != "example-client" {
+		t.Fatalf("Client(\"example-client\") = %#v, %t", client, ok)
+	}
+	if _, ok := cfg.Client("unknown"); ok {
+		t.Fatal("Client(\"unknown\") expected false")
+	}
+
+	emptyUI := Config{}
+	if emptyUI.ExternalUIOrigin() != "" {
+		t.Fatalf("ExternalUIOrigin with nil URL = %q, want empty", emptyUI.ExternalUIOrigin())
+	}
 }
 
 func TestConfigOriginAllowed(t *testing.T) {

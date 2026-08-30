@@ -211,6 +211,80 @@ func TestPostLogoutRedirectRejectsDuplicateValues(t *testing.T) {
 	}
 }
 
+func TestClient_RejectionsAndAcceptLogout(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/admin/oauth2/auth/requests/login/reject",
+			"/admin/oauth2/auth/requests/consent/reject",
+			"/admin/oauth2/auth/requests/logout/reject",
+			"/admin/oauth2/auth/requests/logout/accept":
+			writeJSON(t, w, map[string]string{"redirect_to": "https://hydra.example/callback"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	client, err := New(baseURL, server.Client(), "")
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+
+	rejection := ports.Rejection{Error: "access_denied", ErrorDescription: "denied"}
+	if redirect, err := client.RejectLogin(context.Background(), "c", rejection); err != nil || redirect != "https://hydra.example/callback" {
+		t.Fatalf("RejectLogin error = %v, redirect = %q", err, redirect)
+	}
+	if redirect, err := client.RejectConsent(context.Background(), "c", rejection); err != nil || redirect != "https://hydra.example/callback" {
+		t.Fatalf("RejectConsent error = %v, redirect = %q", err, redirect)
+	}
+	if _, err := client.RejectLogout(context.Background(), "c", rejection); err != nil {
+		t.Fatalf("RejectLogout error = %v", err)
+	}
+	if redirect, err := client.AcceptLogout(context.Background(), "c"); err != nil || redirect != "https://hydra.example/callback" {
+		t.Fatalf("AcceptLogout error = %v, redirect = %q", err, redirect)
+	}
+}
+
+func TestClient_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	// 500 status
+	server500 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal error"))
+	}))
+	defer server500.Close()
+	baseURL500, _ := url.Parse(server500.URL)
+	client500, _ := New(baseURL500, server500.Client(), "")
+	if _, err := client500.GetLoginRequest(context.Background(), "c"); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("500 error = %v, want ErrUpstream", err)
+	}
+
+	// Bad JSON
+	serverBadJSON := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{invalid"))
+	}))
+	defer serverBadJSON.Close()
+	baseURLBadJSON, _ := url.Parse(serverBadJSON.URL)
+	clientBadJSON, _ := New(baseURLBadJSON, serverBadJSON.Client(), "")
+	if _, err := clientBadJSON.GetLoginRequest(context.Background(), "c"); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("bad json error = %v, want ErrUpstream", err)
+	}
+
+	// Network failure (server closed)
+	serverClosed := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	baseURLClosed, _ := url.Parse(serverClosed.URL)
+	clientClosed, _ := New(baseURLClosed, serverClosed.Client(), "")
+	serverClosed.Close()
+
+	if _, err := clientClosed.GetLoginRequest(context.Background(), "c"); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("network failure error = %v, want ErrUpstream", err)
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, value any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")

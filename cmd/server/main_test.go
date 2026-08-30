@@ -265,3 +265,39 @@ func contains(values []string, want string) bool {
 	}
 	return false
 }
+
+func TestNewHTTPClient(t *testing.T) {
+	t.Parallel()
+
+	client := newHTTPClient()
+	if client == nil || client.Transport == nil {
+		t.Fatal("newHTTPClient returned nil client or transport")
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", client.Transport)
+	}
+	if !transport.ForceAttemptHTTP2 {
+		t.Error("ForceAttemptHTTP2 should be true")
+	}
+	if transport.MaxIdleConns != 256 || transport.MaxIdleConnsPerHost != 64 || transport.MaxConnsPerHost != 128 {
+		t.Errorf("unexpected pool limits: MaxIdleConns=%d, MaxIdleConnsPerHost=%d, MaxConnsPerHost=%d",
+			transport.MaxIdleConns, transport.MaxIdleConnsPerHost, transport.MaxConnsPerHost)
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestRun_InvalidListenAddress(t *testing.T) {
+	t.Setenv("PUBLIC_URL", "https://provider.example")
+	t.Setenv("EXTERNAL_UI_URL", "https://ui.example")
+	t.Setenv("HYDRA_ADMIN_URL", "https://hydra.example")
+	t.Setenv("HYDRA_PUBLIC_URL", "https://hydra.example")
+	t.Setenv("KRATOS_PUBLIC_URL", "https://kratos.example")
+	t.Setenv("ALLOWED_CLIENTS", `{"test-client":{"id":"test-client","allowed_redirect_uris":["https://example.com/cb"],"allowed_scopes":["openid"]}}`)
+	t.Setenv("LISTEN_ADDR", "127.0.0.1:-1")
+
+	err := run()
+	if err == nil {
+		t.Fatal("run() with invalid listen address should return error")
+	}
+}

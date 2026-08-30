@@ -92,7 +92,7 @@ func (s *RedisStore) Create(ctx context.Context, transaction domain.Transaction)
 	if transaction.ExpiresAt.IsZero() || !transaction.ExpiresAt.After(s.now()) {
 		return "", domain.ErrExpiredTransaction
 	}
-	payload, err := json.Marshal(cloneTransaction(transaction))
+	payload, err := json.Marshal(transaction)
 	if err != nil {
 		return "", fmt.Errorf("marshal transaction: %w", err)
 	}
@@ -138,7 +138,7 @@ func (s *RedisStore) Get(ctx context.Context, handle string) (domain.Transaction
 	if !transaction.ExpiresAt.After(s.now()) {
 		return domain.Transaction{}, domain.ErrExpiredTransaction
 	}
-	return cloneTransaction(transaction), nil
+	return transaction, nil
 }
 
 // Consume atomically removes and returns an unexpired transaction.
@@ -167,7 +167,7 @@ func (s *RedisStore) Consume(ctx context.Context, handle string) (domain.Transac
 	if !transaction.ExpiresAt.After(s.now()) {
 		return domain.Transaction{}, domain.ErrExpiredTransaction
 	}
-	return cloneTransaction(transaction), nil
+	return transaction, nil
 }
 
 // Ready checks that Redis accepts commands.

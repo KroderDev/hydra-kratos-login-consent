@@ -47,22 +47,7 @@ func run() error {
 	}
 	policyToken := strings.TrimSpace(os.Getenv("POLICY_AUTH_TOKEN"))
 
-	httpClient := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   3 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			TLSHandshakeTimeout:   3 * time.Second,
-			ResponseHeaderTimeout: 8 * time.Second,
-			IdleConnTimeout:       30 * time.Second,
-			MaxIdleConns:          64,
-			MaxIdleConnsPerHost:   16,
-			MaxConnsPerHost:       64,
-			ExpectContinueTimeout: 1 * time.Second,
-		},
-	}
+	httpClient := newHTTPClient()
 	hydraClient, err := hydra.New(cfg.HydraAdminURL, httpClient, adminToken)
 	if err != nil {
 		return fmt.Errorf("create hydra client: %w", err)
@@ -260,4 +245,25 @@ func clientIDs(cfg config.Config) []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   3 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ForceAttemptHTTP2:     true,
+			TLSHandshakeTimeout:   3 * time.Second,
+			ResponseHeaderTimeout: 8 * time.Second,
+			IdleConnTimeout:       30 * time.Second,
+			MaxIdleConns:          256,
+			MaxIdleConnsPerHost:   64,
+			MaxConnsPerHost:       128,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
 }

@@ -1278,3 +1278,161 @@ func TestStartBrowserState(t *testing.T) {
 		t.Fatalf("startBrowserState(invalid) error = %v, want %v", err, domain.ErrInvalidBrowserState)
 	}
 }
+
+func TestTransactionAdmission_EvictsExpiredWhenAtCapacity(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	admission := newTransactionAdmission(2, func() time.Time { return now })
+
+	// Add 2 transactions, 1 will expire
+	if !admission.reserve(now.Add(10 * time.Second)) {
+		t.Fatal("reserve 1 failed")
+	}
+	admission.commit("h1", now.Add(10*time.Second))
+
+	if !admission.reserve(now.Add(10 * time.Minute)) {
+		t.Fatal("reserve 2 failed")
+	}
+	admission.commit("h2", now.Add(10*time.Minute))
+
+	// Clock advances past h1 expiration
+	now = now.Add(20 * time.Second)
+
+	// Reserving when at capacity triggers sweep of h1 and succeeds
+	if !admission.reserve(now.Add(10 * time.Minute)) {
+		t.Fatal("reserve 3 should succeed after sweeping expired h1")
+	}
+	admission.commit("h3", now.Add(10*time.Minute))
+
+	// Now store has h2 and h3 (neither expired). Another reserve must fail.
+	if admission.reserve(now.Add(10 * time.Minute)) {
+		t.Fatal("reserve 4 should fail when full of unexpired transactions")
+	}
+
+	// Release h2
+	admission.release("h2")
+	if !admission.reserve(now.Add(10 * time.Minute)) {
+		t.Fatal("reserve should succeed after releasing h2")
+	}
+}
+
+func TestValidateOpaqueToken_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		token string
+	}{
+		{name: "empty", token: ""},
+		{name: "too short", token: "abc"},
+		{name: "wrong length 42", token: strings.Repeat("a", 42)},
+		{name: "wrong length 44", token: strings.Repeat("a", 44)},
+		{name: "invalid base64 chars", token: "!!!" + strings.Repeat("a", 40)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if err := validateOpaqueToken(tt.token); !errors.Is(err, domain.ErrInvalidBrowserState) {
+				t.Fatalf("validateOpaqueToken(%q) error = %v, want ErrInvalidBrowserState", tt.token, err)
+			}
+		})
+	}
+}
+
+func TestFilterClaims_WithIdentityMappings(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	cfg.OIDCIdentityClaimMappings = identity.ClaimMappings{
+		"email": {Source: "/traits/email", Type: "string", Format: "email"},
+		"role":  {Source: "/metadata_public/role", Type: "string"},
+	}
+	service, err := NewService(cfg, Dependencies{
+		Login:   &fakeHydra{},
+		Consent: &fakeHydra{},
+		Logout:  &fakeHydra{},
+		Kratos:  &fakeKratos{},
+		State:   state.NewMemoryStore(time.Now),
+		Policy:  &fakePolicy{},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	session := domain.Session{
+		IdentityTraits:         map[string]any{"email": "user@example.com"},
+		IdentityMetadataPublic: map[string]any{"role": "admin"},
+	}
+
+	client := config.Client{
+		ID:                       "test-client",
+		AllowedIDTokenClaims:     map[string][]string{"email": {"openid"}},
+		AllowedAccessTokenClaims: map[string][]string{"role": {"openid"}},
+	}
+
+	claims := service.filterClaims(client, domain.Claims{}, session, []string{"openid", "email"})
+	if claims.IDToken["email"] != "user@example.com" {
+		t.Fatalf("IDToken claims = %#v, want email", claims.IDToken)
+	}
+	if claims.AccessToken["role"] != "admin" {
+		t.Fatalf("AccessToken claims = %#v, want role", claims.AccessToken)
+	}
+
+	// Empty derived session claims
+	emptyClaims := service.filterClaims(client, domain.Claims{}, domain.Session{}, []string{"openid", "email"})
+	if len(emptyClaims.IDToken) != 0 || len(emptyClaims.AccessToken) != 0 {
+		t.Fatalf("empty derived session claims = %#v", emptyClaims)
+	}
+
+	// IDToken-only allowed
+	clientOnlyID := config.Client{
+		ID:                   "test-client",
+		AllowedIDTokenClaims: map[string][]string{"email": {"openid"}},
+	}
+	claimsID := service.filterClaims(clientOnlyID, domain.Claims{}, session, []string{"openid", "email"})
+	if claimsID.IDToken["email"] != "user@example.com" || len(claimsID.AccessToken) != 0 {
+		t.Fatalf("claimsID = %#v", claimsID)
+	}
+
+	// AccessToken-only allowed
+	clientOnlyAccess := config.Client{
+		ID:                       "test-client",
+		AllowedAccessTokenClaims: map[string][]string{"role": {"openid"}},
+	}
+	claimsAccess := service.filterClaims(clientOnlyAccess, domain.Claims{}, session, []string{"openid", "email"})
+	if claimsAccess.AccessToken["role"] != "admin" || len(claimsAccess.IDToken) != 0 {
+		t.Fatalf("claimsAccess = %#v", claimsAccess)
+	}
+
+	// Neither allowed
+	clientNeither := config.Client{ID: "test-client"}
+	claimsNeither := service.filterClaims(clientNeither, domain.Claims{}, session, []string{"openid", "email"})
+	if len(claimsNeither.IDToken) != 0 || len(claimsNeither.AccessToken) != 0 {
+		t.Fatalf("claimsNeither = %#v", claimsNeither)
+	}
+}
+
+func TestTransactionAdmission_ReservePastTimestamp(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	admission := newTransactionAdmission(10, func() time.Time { return now })
+	if admission.reserve(now.Add(-time.Second)) {
+		t.Fatal("reserve with past timestamp should return false")
+	}
+}
+
+func TestValidateBrowserState_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	if err := validateBrowserState("", "state"); !errors.Is(err, domain.ErrInvalidBrowserState) {
+		t.Fatalf("validateBrowserState empty actual: %v", err)
+	}
+	if err := validateBrowserState("state", ""); !errors.Is(err, domain.ErrInvalidBrowserState) {
+		t.Fatalf("validateBrowserState empty expected: %v", err)
+	}
+	if err := validateBrowserState("actual-state", "expected-state"); !errors.Is(err, domain.ErrInvalidBrowserState) {
+		t.Fatalf("validateBrowserState mismatch: %v", err)
+	}
+}

@@ -120,7 +120,12 @@ func (c Config) Validate() error {
 		if len(client.AllowedRedirectURIs) == 0 {
 			return fmt.Errorf("client %q has no allowed redirect uris", id)
 		}
-		for _, value := range append(append([]string{}, client.AllowedRedirectURIs...), client.AllowedPostLogoutRedirects...) {
+		for _, value := range client.AllowedRedirectURIs {
+			if err := validateAbsoluteURL(value, secureTransport, true); err != nil {
+				return fmt.Errorf("client %q: %w", id, err)
+			}
+		}
+		for _, value := range client.AllowedPostLogoutRedirects {
 			if err := validateAbsoluteURL(value, secureTransport, true); err != nil {
 				return fmt.Errorf("client %q: %w", id, err)
 			}
@@ -184,37 +189,49 @@ func (c Config) ExternalRedirect(flow domain.Flow, transaction, csrfToken string
 		return "", domain.ErrInvalidTransaction
 	}
 	callback := c.callbackURL(flow)
-	callbackQuery := callback.Query()
-	callbackQuery.Set("csrf", csrfToken)
-	callbackQuery.Set("transaction", transaction)
-	callbackQuery.Set("flow", string(flow))
-	callback.RawQuery = callbackQuery.Encode()
+	callback.RawQuery = url.Values{
+		"flow":        {string(flow)},
+		"transaction": {transaction},
+		"csrf":        {csrfToken},
+	}.Encode()
 
 	redirect := *c.ExternalUIURL
-	query := redirect.Query()
-	query.Set("flow", string(flow))
-	query.Set("transaction", transaction)
-	query.Set("csrf", csrfToken)
-	query.Set("return_to", callback.String())
-	redirect.RawQuery = query.Encode()
+	redirect.RawQuery = url.Values{
+		"flow":        {string(flow)},
+		"transaction": {transaction},
+		"csrf":        {csrfToken},
+		"return_to":   {callback.String()},
+	}.Encode()
 	return redirect.String(), nil
 }
 
 // ExternalConsentRedirect adds safe consent display data to an external UI handoff.
 func (c Config) ExternalConsentRedirect(transaction, csrfToken, clientName string, scopes []string) (string, error) {
-	redirect, err := c.ExternalRedirect(domain.FlowConsent, transaction, csrfToken)
-	if err != nil {
-		return "", err
+	if transaction == "" || csrfToken == "" {
+		return "", domain.ErrInvalidTransaction
 	}
-	parsed, err := url.Parse(redirect)
-	if err != nil {
-		return "", err
+	callback := c.callbackURL(domain.FlowConsent)
+	callback.RawQuery = url.Values{
+		"flow":        {string(domain.FlowConsent)},
+		"transaction": {transaction},
+		"csrf":        {csrfToken},
+	}.Encode()
+
+	redirect := *c.ExternalUIURL
+	query := url.Values{
+		"flow":        {string(domain.FlowConsent)},
+		"transaction": {transaction},
+		"csrf":        {csrfToken},
+		"return_to":   {callback.String()},
 	}
-	query := parsed.Query()
-	query.Set("client_name", clientName)
-	query.Set("scope", strings.Join(scopes, " "))
-	parsed.RawQuery = query.Encode()
-	return parsed.String(), nil
+	if clientName != "" {
+		query.Set("client_name", clientName)
+	}
+	if len(scopes) > 0 {
+		query.Set("scope", strings.Join(scopes, " "))
+	}
+	redirect.RawQuery = query.Encode()
+	return redirect.String(), nil
 }
 
 // CallbackURL returns the provider callback for a configured flow.
@@ -223,12 +240,15 @@ func (c Config) CallbackURL(flow domain.Flow) string {
 }
 
 func (c Config) callbackURL(flow domain.Flow) *url.URL {
-	path := map[domain.Flow]string{
-		domain.FlowLogin:   "/login/callback",
-		domain.FlowConsent: "/consent",
-		domain.FlowLogout:  "/logout",
-	}[flow]
-	if path == "" {
+	var path string
+	switch flow {
+	case domain.FlowLogin:
+		path = "/login/callback"
+	case domain.FlowConsent:
+		path = "/consent"
+	case domain.FlowLogout:
+		path = "/logout"
+	default:
 		path = "/login/callback"
 	}
 	base := *c.ProviderURL

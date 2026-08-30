@@ -265,3 +265,23 @@ func contains(values []string, want string) bool {
 	}
 	return false
 }
+
+func TestNewHTTPClient(t *testing.T) {
+	t.Parallel()
+
+	client := newHTTPClient()
+	if client == nil || client.Transport == nil {
+		t.Fatal("newHTTPClient returned nil client or transport")
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", client.Transport)
+	}
+	if !transport.ForceAttemptHTTP2 {
+		t.Error("ForceAttemptHTTP2 should be true")
+	}
+	if transport.MaxIdleConns != 256 || transport.MaxIdleConnsPerHost != 64 || transport.MaxConnsPerHost != 128 {
+		t.Errorf("unexpected pool limits: MaxIdleConns=%d, MaxIdleConnsPerHost=%d, MaxConnsPerHost=%d",
+			transport.MaxIdleConns, transport.MaxIdleConnsPerHost, transport.MaxConnsPerHost)
+	}
+}

@@ -1,6 +1,8 @@
 package identity
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
 	"reflect"
 	"strings"
@@ -702,5 +704,56 @@ func TestMappingValue_UnparsedFallbackAndEdgeCases(t *testing.T) {
 	// Non-existent key
 	if _, ok := resolvePointer(doc, "/traits/not_found"); ok {
 		t.Fatal("resolvePointer not found key expected false")
+	}
+
+	// Invalid mapping sources in mappingValue
+	if _, ok := mappingValue(doc, Mapping{}); ok {
+		t.Fatal("mappingValue with empty source expected false")
+	}
+
+	// Invalid pointer parsing in mappingValue fallback
+	if _, ok := mappingValue(doc, Mapping{Source: "invalid"}); ok {
+		t.Fatal("mappingValue with invalid pointer source expected false")
+	}
+}
+
+func TestClaimMappings_MaxLimitsAndJsonNumbers(t *testing.T) {
+	t.Parallel()
+
+	// Exceed max mappings (maxMappings is 64)
+	largeMappings := make(ClaimMappings)
+	for i := range 65 {
+		largeMappings[fmt.Sprintf("claim_%d", i)] = Mapping{Source: "/traits/a", Type: "string"}
+	}
+	if err := largeMappings.Validate(false); err == nil {
+		t.Fatal("Validate should fail when exceeding maxMappings")
+	}
+
+	// Exceed max pointer bytes (maxPointerBytes is 512)
+	longSource := "/traits/" + strings.Repeat("a", 513)
+	mLong := ClaimMappings{"long": {Source: longSource, Type: "string"}}
+	if err := mLong.Validate(false); err == nil {
+		t.Fatal("Validate should fail when pointer exceeds maxPointerBytes")
+	}
+
+	// Exceed max pointer tokens (16 tokens max)
+	manyTokensSource := "/traits" + strings.Repeat("/a", 17)
+	mTokens := ClaimMappings{"tokens": {Source: manyTokensSource, Type: "string"}}
+	if err := mTokens.Validate(false); err == nil {
+		t.Fatal("Validate should fail when pointer exceeds maxPointerTokens")
+	}
+
+	// json.Number in isNumber and isInteger
+	if !isNumber(json.Number("123.45")) {
+		t.Fatal("isNumber(json.Number(123.45)) should be true")
+	}
+	if isNumber(json.Number("invalid")) {
+		t.Fatal("isNumber(json.Number(invalid)) should be false")
+	}
+	if !isInteger(json.Number("123")) {
+		t.Fatal("isInteger(json.Number(123)) should be true")
+	}
+	if isInteger(json.Number("123.45")) {
+		t.Fatal("isInteger(json.Number(123.45)) should be false")
 	}
 }

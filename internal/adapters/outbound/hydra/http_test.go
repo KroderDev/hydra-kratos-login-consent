@@ -247,6 +247,44 @@ func TestClient_RejectionsAndAcceptLogout(t *testing.T) {
 	}
 }
 
+func TestClient_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	// 500 status
+	server500 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal error"))
+	}))
+	defer server500.Close()
+	baseURL500, _ := url.Parse(server500.URL)
+	client500, _ := New(baseURL500, server500.Client(), "")
+	if _, err := client500.GetLoginRequest(context.Background(), "c"); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("500 error = %v, want ErrUpstream", err)
+	}
+
+	// Bad JSON
+	serverBadJSON := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{invalid"))
+	}))
+	defer serverBadJSON.Close()
+	baseURLBadJSON, _ := url.Parse(serverBadJSON.URL)
+	clientBadJSON, _ := New(baseURLBadJSON, serverBadJSON.Client(), "")
+	if _, err := clientBadJSON.GetLoginRequest(context.Background(), "c"); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("bad json error = %v, want ErrUpstream", err)
+	}
+
+	// Network failure (server closed)
+	serverClosed := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	baseURLClosed, _ := url.Parse(serverClosed.URL)
+	clientClosed, _ := New(baseURLClosed, serverClosed.Client(), "")
+	serverClosed.Close()
+
+	if _, err := clientClosed.GetLoginRequest(context.Background(), "c"); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("network failure error = %v, want ErrUpstream", err)
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, value any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")

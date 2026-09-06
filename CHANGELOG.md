@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.4](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.5.3...v0.5.4) (2026-09-06)
+
+
+### Dependencies
+
+* **deps:** bump github/codeql-action/upload-sarif ([3412924](https://github.com/KroderDev/hydra-kratos-login-consent/commit/341292402e65a969703c08566e06da3d479ebdc5))
+* **deps:** bump golang in the docker-non-major group ([e2525fd](https://github.com/KroderDev/hydra-kratos-login-consent/commit/e2525fd6a83d3cadab8fd775a1721c13d28954f6))
+
 ## [0.5.3](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.5.2...v0.5.3) (2026-08-30)
 
 

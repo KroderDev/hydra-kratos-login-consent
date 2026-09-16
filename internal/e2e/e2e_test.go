@@ -510,7 +510,9 @@ func (f *hydraFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		writeStatus(w, http.StatusOK)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/oauth2/auth/requests/login":
 		writeJSONNoTest(w, map[string]any{
-			"challenge": r.URL.Query().Get("login_challenge"),
+			"challenge":   r.URL.Query().Get("login_challenge"),
+			"request_url": "https://hydra.example/oauth2/auth?client_id=example-client",
+			"subject":     "",
 			"client": map[string]any{
 				"client_id":     "example-client",
 				"client_name":   "Example Client",

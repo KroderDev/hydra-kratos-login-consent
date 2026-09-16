@@ -1,0 +1,39 @@
+name: oidf-conformance
+
+on:
+  schedule:
+    - cron: "17 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    if: github.event_name == 'workflow_dispatch' || vars.OIDF_CONFORMANCE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CONFORMANCE_SERVER: ${{ secrets.OIDF_CONFORMANCE_SERVER }}
+      CONFORMANCE_PLAN: ${{ vars.OIDF_CONFORMANCE_PLAN }}
+      CONFORMANCE_SUITE_REF: ${{ vars.OIDF_CONFORMANCE_SUITE_REF }}
+      OIDF_VARIANT_JSON: ${{ secrets.OIDF_VARIANT_JSON }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate conformance configuration
+        run: |
+          set -eu
+          test -n "$CONFORMANCE_SERVER"
+          test -n "$CONFORMANCE_PLAN"
+          test -n "$CONFORMANCE_SUITE_REF"
+          test -n "$OIDF_VARIANT_JSON"
+      - name: Checkout pinned OpenID Foundation suite
+        run: |
+          set -eu
+          git clone --filter=blob:none https://gitlab.com/openid/conformance-suite.git "$RUNNER_TEMP/conformance-suite"
+          git -C "$RUNNER_TEMP/conformance-suite" checkout --detach "$CONFORMANCE_SUITE_REF"
+      - name: Run configured test plan
+        working-directory: ${{ runner.temp }}/conformance-suite
+        run: |
+          set -eu
+          printf '%s' "$OIDF_VARIANT_JSON" > "$RUNNER_TEMP/oidf-variant.json"
+          python scripts/run-test-plan.py --no-parallel "$CONFORMANCE_PLAN" "$RUNNER_TEMP/oidf-variant.json"

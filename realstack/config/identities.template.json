@@ -1,0 +1,32 @@
+[
+  {
+    "id": "realstack-operator",
+    "schema_id": "default",
+    "traits": {
+      "email": "operator@example.com",
+      "name": "Realstack Operator"
+    },
+    "credentials": {
+      "password": {
+        "config": {
+          "password": "__REALSTACK_PASSWORD__"
+        }
+      }
+    }
+  },
+  {
+    "id": "realstack-denied",
+    "schema_id": "default",
+    "traits": {
+      "email": "basic@example.com",
+      "name": "Basic Operator"
+    },
+    "credentials": {
+      "password": {
+        "config": {
+          "password": "__REALSTACK_BASIC_PASSWORD__"
+        }
+      }
+    }
+  }
+]

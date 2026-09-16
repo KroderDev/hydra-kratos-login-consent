@@ -23,7 +23,9 @@ func TestClient_LoginRequests(t *testing.T) {
 				t.Fatalf("login challenge = %q, want login-challenge", r.URL.Query().Get("login_challenge"))
 			}
 			writeJSON(t, w, map[string]any{
-				"challenge": "login-challenge",
+				"challenge":   "login-challenge",
+				"request_url": "https://hydra.example/oauth2/auth?client_id=example-client",
+				"subject":     "",
 				"client": map[string]any{
 					"client_id":     "example-client",
 					"client_name":   "Example Client",

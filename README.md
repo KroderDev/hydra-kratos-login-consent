@@ -144,14 +144,20 @@ golangci-lint run ./...
 govulncheck ./...
 ```
 
-The integration suite is the provider's end-to-end contract. It drives the
-public HTTP handler and real Hydra, Kratos, policy, and Redis adapters against
-isolated HTTP and Redis fixtures. Run it with `make e2e`; it is also required
-in CI. `make e2e-docker` runs the same contract against a pinned Redis
-container on localhost through Docker host networking on Linux; set
-`E2E_REDIS_URL` when running the suite against a shared test Redis. Live Hydra
-and Kratos container tests remain deployment-level tests and must use pinned
-service images and runtime configuration.
+The fixture integration suite is the provider's fast end-to-end contract. It
+drives the public HTTP handler and real adapters against isolated HTTP and
+Redis fixtures. Run it with `make e2e`; it is also required in CI.
+`make e2e-docker` runs the same contract against a pinned Redis container on
+localhost through Docker host networking on Linux.
+
+The real-service suite starts pinned Hydra, Kratos, Redis, policy, and provider
+containers and runs a browser-style authorization-code + PKCE flow. It also
+uses `go-oidc` independently to validate discovery, the ID-token signature,
+issuer, audience, expiry, nonce, ACR/AMR, claim filtering, remembered consent,
+rejected consent/login, requested and granted scopes/audiences, and logout. Run it with `make integration-real`; it requires
+Docker and uses test-only credentials supplied by Make defaults or the
+`REALSTACK_*` environment variables. See [integration testing](docs/testing.md)
+for the suite boundaries and OpenID Foundation Conformance Suite procedure.
 
 ## Container Image
 

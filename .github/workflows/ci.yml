@@ -42,6 +42,30 @@ jobs:
       - name: End-to-end provider contract
         run: go test -race -tags=integration -count=1 -shuffle=on ./...
 
+  realstack:
+    runs-on: ubuntu-latest
+    env:
+      REALSTACK_CLIENT_SECRET: realstack-client-secret
+      REALSTACK_PASSWORD: realstack-operator-password
+      REALSTACK_BASIC_PASSWORD: realstack-basic-password
+      REALSTACK_POLICY_TOKEN: realstack-policy-token
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Start pinned Hydra, Kratos, Redis, policy, and provider
+        run: docker compose -f docker-compose.realstack.yml up --build --wait
+      - name: OIDC code and PKCE smoke
+        run: go test -race -tags=integration,realstack -count=1 -shuffle=on ./internal/e2e
+      - name: Real-stack logs
+        if: failure()
+        run: docker compose -f docker-compose.realstack.yml logs --no-color
+      - name: Stop real stack
+        if: always()
+        run: docker compose -f docker-compose.realstack.yml down -v
+
   lint:
     runs-on: ubuntu-latest
     steps:

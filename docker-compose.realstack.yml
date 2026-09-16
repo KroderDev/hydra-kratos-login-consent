@@ -1,0 +1,190 @@
+services:
+  redis:
+    image: redis:7.4.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  hydra-migrate:
+    image: oryd/hydra:v2.2.0
+    command: ["migrate", "-c", "/etc/config/hydra/hydra.yml", "sql", "-e", "--yes"]
+    environment:
+      DSN: sqlite:///var/lib/sqlite/db.sqlite?_fk=true
+    volumes:
+      - hydra-sqlite:/var/lib/sqlite
+      - ./realstack/config:/etc/config/hydra:ro
+
+  hydra:
+    image: oryd/hydra:v2.2.0
+    command: ["serve", "-c", "/etc/config/hydra/hydra.yml", "all", "--dev"]
+    depends_on:
+      hydra-migrate:
+        condition: service_completed_successfully
+    environment:
+      DSN: sqlite:///var/lib/sqlite/db.sqlite?_fk=true
+    volumes:
+      - hydra-sqlite:/var/lib/sqlite
+      - ./realstack/config:/etc/config/hydra:ro
+    ports:
+      - "127.0.0.1:4444:4444"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:4445/health/ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  hydra-init:
+    image: oryd/hydra:v2.2.0
+    depends_on:
+      hydra:
+        condition: service_healthy
+    environment:
+      HYDRA_ENDPOINT: http://hydra:4445
+      REALSTACK_CLIENT_SECRET: ${REALSTACK_CLIENT_SECRET:?REALSTACK_CLIENT_SECRET must be set}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if hydra get oauth2-client realstack-client --endpoint "$${HYDRA_ENDPOINT}" >/dev/null 2>&1; then
+          exit 0
+        fi
+        case "$${REALSTACK_CLIENT_SECRET}" in
+          *'"'*|*'\\'*)
+            echo 'REALSTACK_CLIENT_SECRET must not contain JSON quote or backslash characters' >&2
+            exit 2
+            ;;
+        esac
+        payload=$$(printf '%s' '{"client_id":"realstack-client","client_secret":"' \
+          "$${REALSTACK_CLIENT_SECRET}" \
+          '","client_name":"realstack","grant_types":["authorization_code"],"response_types":["code"],"scope":"openid profile email","audience":["https://api.example.test"],"redirect_uris":["http://127.0.0.1:5555/callback"],"post_logout_redirect_uris":["http://127.0.0.1:5555/logout-callback"],"token_endpoint_auth_method":"client_secret_basic"}')
+        wget -q -O /dev/null --header 'Content-Type: application/json' \
+          --post-data "$${payload}" "$${HYDRA_ENDPOINT}/admin/clients"
+
+  kratos-migrate:
+    image: oryd/kratos:v1.3.1
+    command: ["-c", "/etc/config/kratos/kratos.yml", "migrate", "sql", "-e", "--yes"]
+    environment:
+      DSN: sqlite:///var/lib/sqlite/db.sqlite?_fk=true&mode=rwc
+    volumes:
+      - kratos-sqlite:/var/lib/sqlite
+      - ./realstack/config:/etc/config/kratos:ro
+
+  kratos:
+    image: oryd/kratos:v1.3.1
+    command: ["serve", "-c", "/etc/config/kratos/kratos.yml", "--dev"]
+    depends_on:
+      kratos-migrate:
+        condition: service_completed_successfully
+    environment:
+      DSN: sqlite:///var/lib/sqlite/db.sqlite?_fk=true
+    volumes:
+      - kratos-sqlite:/var/lib/sqlite
+      - ./realstack/config:/etc/config/kratos:ro
+    ports:
+      - "127.0.0.1:4433:4433"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:4434/health/ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  kratos-seed:
+    image: oryd/kratos:v1.3.1
+    depends_on:
+      kratos:
+        condition: service_healthy
+    environment:
+      KRATOS_ENDPOINT: http://kratos:4434
+      REALSTACK_PASSWORD: ${REALSTACK_PASSWORD:?REALSTACK_PASSWORD must be set}
+      REALSTACK_BASIC_PASSWORD: ${REALSTACK_BASIC_PASSWORD:?REALSTACK_BASIC_PASSWORD must be set}
+    volumes:
+      - ./realstack/config:/etc/config/kratos:ro
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - >-
+        sed "s|__REALSTACK_PASSWORD__|$${REALSTACK_PASSWORD}|g; s|__REALSTACK_BASIC_PASSWORD__|$${REALSTACK_BASIC_PASSWORD}|g"
+        /etc/config/kratos/identities.template.json > /tmp/identities.json
+        && kratos import identities --endpoint "$${KRATOS_ENDPOINT}" /tmp/identities.json
+
+  ui:
+    build:
+      context: ./realstack/ui
+    environment:
+      KRATOS_INTERNAL_URL: http://kratos:4433
+      KRATOS_BROWSER_URL: http://localhost:4433
+      KRATOS_LOGIN_AAL: aal1
+      PROVIDER_BROWSER_URL: http://localhost:8080
+    depends_on:
+      kratos:
+        condition: service_started
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:3000/healthz"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  policy:
+    build:
+      context: ./realstack/policy
+    environment:
+      REALSTACK_POLICY_TOKEN: ${REALSTACK_POLICY_TOKEN:?REALSTACK_POLICY_TOKEN must be set}
+      REALSTACK_POLICY_CLIENT_ID: realstack-client
+      REALSTACK_POLICY_DENY_SUBJECT: realstack-denied
+    ports:
+      - "127.0.0.1:8090:8090"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8090/healthz"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  provider:
+    build:
+      context: .
+      args:
+        RUN_INTEGRATION_TESTS: "false"
+    depends_on:
+      hydra-init:
+        condition: service_completed_successfully
+      kratos-seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      ui:
+        condition: service_healthy
+      policy:
+        condition: service_healthy
+    environment:
+      LISTEN_ADDR: :8080
+      PUBLIC_URL: http://localhost:8080
+      EXTERNAL_UI_URL: http://localhost:3000/login
+      HYDRA_ADMIN_URL: http://hydra:4445
+      HYDRA_PUBLIC_URL: http://localhost:4444
+      KRATOS_PUBLIC_URL: http://kratos:4433
+      KRATOS_SESSION_COOKIE: ory_kratos_session
+      REQUIRED_AAL: aal1
+      TRANSACTION_TTL: 5m
+      ENVIRONMENT: development
+      POLICY_BACKEND: http
+      POLICY_URL: http://policy:8090/v1/authorize
+      POLICY_AUTH_TOKEN: ${REALSTACK_POLICY_TOKEN:?REALSTACK_POLICY_TOKEN must be set}
+      ALLOWED_CLIENTS: '{"realstack-client":{"allowed_redirect_uris":["http://127.0.0.1:5555/callback"],"allowed_post_logout_redirect_uris":["http://127.0.0.1:5555/logout-callback"],"allowed_scopes":["openid","profile","email"],"allowed_audiences":["https://api.example.test"],"allowed_id_token_claims":{"email":["email"],"role":["profile"]},"allowed_access_token_claims":{"tenant":[]}}}'
+      OIDC_IDENTITY_CLAIM_MAPPINGS: '{"email":{"source":"/traits/email","type":"string","format":"email"}}'
+      STATE_STORE: redis
+      REDIS_URL: redis://redis:6379/0
+      REDIS_KEY_PREFIX: "realstack:transaction:"
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8080/healthz"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+volumes:
+  hydra-sqlite:
+  kratos-sqlite:

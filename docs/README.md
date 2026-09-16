@@ -8,3 +8,4 @@
 - [Remote policy contract](policy-contract.md)
 - [Container image](container.md)
 - [Image release and verification](release.md)
+- [Integration and conformance testing](testing.md)

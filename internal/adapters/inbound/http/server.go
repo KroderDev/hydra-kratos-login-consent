@@ -261,8 +261,47 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request, target string)
 
 func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	status := statusForError(err)
-	s.logger.ErrorContext(r.Context(), "request failed", "request_id", requestID(r.Context()), "status", status, "error_type", fmt.Sprintf("%T", err))
+	s.logger.ErrorContext(r.Context(), "request failed", "request_id", requestID(r.Context()), "status", status, "error_type", fmt.Sprintf("%T", err), "error_code", safeErrorCode(err))
 	s.writeJSON(w, status, map[string]string{"error": publicError(status)})
+}
+
+func safeErrorCode(err error) string {
+	switch {
+	case errors.Is(err, domain.ErrInvalidOrigin):
+		return "invalid_origin"
+	case errors.Is(err, domain.ErrPolicyDenied):
+		return "policy_denied"
+	case errors.Is(err, domain.ErrUnauthenticated):
+		return "unauthenticated"
+	case errors.Is(err, domain.ErrInsufficientAssurance):
+		return "insufficient_assurance"
+	case errors.Is(err, domain.ErrInvalidCSRF):
+		return "invalid_csrf"
+	case errors.Is(err, domain.ErrInvalidBrowserState):
+		return "invalid_browser_state"
+	case errors.Is(err, domain.ErrInvalidTransaction):
+		return "invalid_transaction"
+	case errors.Is(err, domain.ErrExpiredTransaction):
+		return "expired_transaction"
+	case errors.Is(err, domain.ErrReplay):
+		return "replay"
+	case errors.Is(err, domain.ErrInvalidRemember):
+		return "invalid_remember"
+	case errors.Is(err, domain.ErrInvalidScope):
+		return "invalid_scope"
+	case errors.Is(err, domain.ErrInvalidAudience):
+		return "invalid_audience"
+	case errors.Is(err, domain.ErrInvalidClient):
+		return "invalid_client"
+	case errors.Is(err, domain.ErrInvalidRedirect):
+		return "invalid_redirect"
+	case errors.Is(err, domain.ErrInvalidDecision):
+		return "invalid_decision"
+	case errors.Is(err, domain.ErrUpstream):
+		return "upstream"
+	default:
+		return "internal"
+	}
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, value any) {

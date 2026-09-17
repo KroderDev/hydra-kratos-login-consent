@@ -154,7 +154,9 @@ func (c Config) Validate() error {
 
 // ResolveACR resolves the first configured or built-in ACR value in values.
 // It returns the internal Kratos AAL and the original ACR value to send back
-// to Hydra. An empty input means that no request-specific assurance was made.
+// to Hydra. An empty input means that no request-specific assurance was made;
+// an empty value or a list with no supported value returns
+// domain.ErrInvalidAssurance.
 func (c Config) ResolveACR(values []string) (string, string, error) {
 	for _, value := range values {
 		value = strings.TrimSpace(value)
@@ -391,6 +393,8 @@ func validateClaimAllowlist(clientID string, claims map[string][]string, allowed
 	return nil
 }
 
+// validateOIDCACRMappings rejects blank or control-bearing ACR values and AALs
+// that the provider cannot enforce.
 func validateOIDCACRMappings(mappings map[string]string) error {
 	for acr, aal := range mappings {
 		if strings.TrimSpace(acr) == "" || strings.ContainsAny(acr, "\r\n") {

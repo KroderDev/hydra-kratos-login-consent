@@ -431,6 +431,8 @@ func (s *uiServer) getKratosFlow(r *http.Request, kind, flowID string, w http.Re
 	return flow, nil
 }
 
+// flowAction accepts only a matching Kratos self-service action and rewrites its
+// internal origin to the browser-visible Kratos origin.
 func (s *uiServer) flowAction(value any, kind, flowID string) (string, bool) {
 	raw, ok := value.(string)
 	if !ok || strings.TrimSpace(raw) == "" {
@@ -458,6 +460,8 @@ func (s *uiServer) flowAction(value any, kind, flowID string) (string, bool) {
 	return parsed.String(), true
 }
 
+// safeFlowFields converts Kratos UI nodes through an explicit field allowlist;
+// unknown and sensitive nodes are omitted.
 func safeFlowFields(value any) []formField {
 	nodes, ok := value.([]any)
 	if !ok {
@@ -618,6 +622,8 @@ func booleanQuery(query url.Values, name string) (bool, error) {
 	return parsed, err
 }
 
+// maxAgeQuery returns max_age and whether it was present. Duplicate, blank,
+// nonnumeric, and negative values are rejected.
 func maxAgeQuery(query url.Values) (int64, bool, error) {
 	values, ok := query["max_age"]
 	if !ok {
@@ -659,6 +665,8 @@ func (s *uiServer) browserEndpoint(base *url.URL, path string, query url.Values)
 	return endpoint.String()
 }
 
+// validateUIReturnTo permits only query-free login and settings URLs on the
+// configured UI origin.
 func (s *uiServer) validateUIReturnTo(value string) (string, error) {
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" || !sameOrigin(parsed, s.uiBrowser) {
@@ -727,6 +735,8 @@ func boolValue(value any) bool {
 	return result
 }
 
+// kratosCookieHeader forwards only the Kratos session and CSRF cookies needed
+// to retrieve a browser flow.
 func kratosCookieHeader(r *http.Request) string {
 	values := make([]string, 0, len(r.Cookies()))
 	for _, cookie := range r.Cookies() {

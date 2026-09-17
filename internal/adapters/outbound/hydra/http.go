@@ -47,7 +47,8 @@ func New(baseURL *url.URL, httpClient *http.Client, token string) (*Client, erro
 	return &Client{api: hydraapi.NewAPIClient(configuration)}, nil
 }
 
-// GetLoginRequest retrieves a Hydra login challenge.
+// GetLoginRequest retrieves a Hydra login challenge and preserves its requested
+// prompt, max_age, and ACR values for application-level validation.
 func (c *Client) GetLoginRequest(ctx context.Context, challenge string) (domain.LoginRequest, error) {
 	response, httpResponse, err := c.api.OAuth2API.GetOAuth2LoginRequest(ctx).
 		LoginChallenge(challenge).
@@ -110,7 +111,8 @@ func (c *Client) RejectLogin(ctx context.Context, challenge string, rejection po
 	return redirectResponse(response, err)
 }
 
-// GetConsentRequest retrieves a Hydra consent challenge.
+// GetConsentRequest retrieves a Hydra consent challenge and preserves its
+// requested prompt, scopes, and access-token audiences.
 func (c *Client) GetConsentRequest(ctx context.Context, challenge string) (domain.ConsentRequest, error) {
 	response, httpResponse, err := c.api.OAuth2API.GetOAuth2ConsentRequest(ctx).
 		ConsentChallenge(challenge).
@@ -266,6 +268,8 @@ func firstValue(values []string) string {
 	return values[0]
 }
 
+// parseOIDCRequestURL extracts a single prompt and nonnegative max_age from
+// Hydra's original authorization URL. Malformed values return ErrUpstream.
 func parseOIDCRequestURL(requestURL string) (string, *int64, error) {
 	if requestURL == "" {
 		return "", nil, nil

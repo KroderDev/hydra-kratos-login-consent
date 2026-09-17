@@ -40,7 +40,9 @@ func New(baseURL *url.URL, httpClient *http.Client) (*Client, error) {
 	return &Client{baseURL: baseURL, httpClient: &client}, nil
 }
 
-// ValidateSession asks Kratos to validate opaque browser credentials.
+// ValidateSession asks Kratos to validate opaque browser credentials. For an
+// active session, it returns the subject, assurance context, authentication
+// time, identity traits, and public identity metadata.
 func (c *Client) ValidateSession(ctx context.Context, credentials ports.SessionCredentials) (domain.Session, error) {
 	if credentials.CookieValue == "" && credentials.Token == "" {
 		return domain.Session{}, domain.ErrUnauthenticated

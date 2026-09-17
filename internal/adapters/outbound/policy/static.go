@@ -41,7 +41,9 @@ func (p *Static) AuthorizeLogin(_ context.Context, input ports.PolicyInput) (boo
 	return p.allowed(input.Subject, input.ClientID), nil
 }
 
-// AuthorizeConsent evaluates the same static policy for requested scopes.
+// AuthorizeConsent evaluates the static subject, client, scope, and audience
+// rules. For an allowed decision, an empty granted-audience list grants all
+// requested audiences.
 func (p *Static) AuthorizeConsent(_ context.Context, input ports.PolicyInput) (ports.ConsentDecision, error) {
 	allowed := p.allowed(input.Subject, input.ClientID)
 	if allowed {

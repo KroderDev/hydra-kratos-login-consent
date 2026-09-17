@@ -49,6 +49,7 @@ type Config struct {
 	PolicyBackend             PolicyBackend
 	PolicyURL                 *url.URL
 	OIDCIdentityClaimMappings identity.ClaimMappings
+	OIDCACRMappings           map[string]string
 }
 
 const (
@@ -98,6 +99,9 @@ func (c Config) Validate() error {
 	if err := c.OIDCIdentityClaimMappings.Validate(c.IsSecureEnvironment()); err != nil {
 		return fmt.Errorf("validate oidc identity claim mappings: %w", err)
 	}
+	if err := validateOIDCACRMappings(c.OIDCACRMappings); err != nil {
+		return err
+	}
 	policyBackend := c.PolicyBackend
 	if policyBackend == "" {
 		policyBackend = PolicyBackendStatic
@@ -146,6 +150,33 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// ResolveACR resolves the first configured or built-in ACR value in values.
+// It returns the internal Kratos AAL and the original ACR value to send back
+// to Hydra. An empty input means that no request-specific assurance was made;
+// an empty value or a list with no supported value returns
+// domain.ErrInvalidAssurance.
+func (c Config) ResolveACR(values []string) (string, string, error) {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return "", "", domain.ErrInvalidAssurance
+		}
+	}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if aal, ok := c.OIDCACRMappings[value]; ok {
+			return strings.ToLower(strings.TrimSpace(aal)), value, nil
+		}
+		if domain.SupportedAAL(value) {
+			return strings.ToLower(value), value, nil
+		}
+	}
+	if len(values) > 0 {
+		return "", "", domain.ErrInvalidAssurance
+	}
+	return "", "", nil
 }
 
 // EffectiveMaxPendingTransactions returns the configured quota or the bounded
@@ -207,6 +238,12 @@ func (c Config) ExternalRedirect(flow domain.Flow, transaction, csrfToken string
 
 // ExternalConsentRedirect adds safe consent display data to an external UI handoff.
 func (c Config) ExternalConsentRedirect(transaction, csrfToken, clientName string, scopes []string) (string, error) {
+	return c.ExternalConsentRedirectWithAudience(transaction, csrfToken, clientName, scopes, nil)
+}
+
+// ExternalConsentRedirectWithAudience adds safe consent display data and
+// requested audiences to an external UI handoff.
+func (c Config) ExternalConsentRedirectWithAudience(transaction, csrfToken, clientName string, scopes, audiences []string) (string, error) {
 	if transaction == "" || csrfToken == "" {
 		return "", domain.ErrInvalidTransaction
 	}
@@ -229,6 +266,9 @@ func (c Config) ExternalConsentRedirect(transaction, csrfToken, clientName strin
 	}
 	if len(scopes) > 0 {
 		query.Set("scope", strings.Join(scopes, " "))
+	}
+	if len(audiences) > 0 {
+		query.Set("audience", strings.Join(audiences, " "))
 	}
 	redirect.RawQuery = query.Encode()
 	return redirect.String(), nil
@@ -348,6 +388,20 @@ func validateClaimAllowlist(clientID string, claims map[string][]string, allowed
 			if strings.TrimSpace(scope) == "" || !containsString(allowedScopes, scope) {
 				return fmt.Errorf("client %q claim %q requires an unallowlisted scope %q", clientID, name, scope)
 			}
+		}
+	}
+	return nil
+}
+
+// validateOIDCACRMappings rejects blank or control-bearing ACR values and AALs
+// that the provider cannot enforce.
+func validateOIDCACRMappings(mappings map[string]string) error {
+	for acr, aal := range mappings {
+		if strings.TrimSpace(acr) == "" || strings.ContainsAny(acr, "\r\n") {
+			return fmt.Errorf("oidc acr mappings contain an invalid acr value")
+		}
+		if !domain.SupportedAAL(aal) {
+			return fmt.Errorf("oidc acr mapping %q has unsupported aal %q", acr, aal)
 		}
 	}
 	return nil

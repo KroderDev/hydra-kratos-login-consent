@@ -1,0 +1,77 @@
+version: v26.2.0
+
+dsn: sqlite:///var/lib/sqlite/db.sqlite?_fk=true
+
+serve:
+  public:
+    base_url: http://127.0.0.1:4433/
+  admin:
+    base_url: http://kratos:4434/
+
+selfservice:
+  default_browser_return_url: http://127.0.0.1:3000/
+  allowed_return_urls:
+    - http://127.0.0.1:3000/
+    - http://127.0.0.1:3000/login
+    - http://127.0.0.1:3000/settings
+    - http://127.0.0.1:3000/logout/complete
+    - http://127.0.0.1:8080/login/callback
+    - http://127.0.0.1:18080/login/callback
+
+  methods:
+    password:
+      enabled: true
+      config:
+        haveibeenpwned_enabled: false
+    totp:
+      enabled: true
+      config:
+        issuer: hydra-kratos-realstack
+
+  flows:
+    error:
+      ui_url: http://127.0.0.1:3000/error
+    login:
+      ui_url: http://127.0.0.1:3000/login
+      lifespan: 10m
+    registration:
+      ui_url: http://127.0.0.1:3000/registration
+      lifespan: 10m
+      style: unified
+      after:
+        password:
+          hooks:
+            - hook: session
+    settings:
+      ui_url: http://127.0.0.1:3000/settings
+      privileged_session_max_age: 15m
+      required_aal: highest_available
+    logout:
+      after:
+        default_browser_return_url: http://127.0.0.1:3000/login
+
+log:
+  level: warning
+  format: json
+  leak_sensitive_values: false
+
+# Secrets are supplied through Compose environment variables.
+secrets: {}
+
+ciphers:
+  algorithm: xchacha20-poly1305
+
+hashers:
+  algorithm: bcrypt
+  bcrypt:
+    cost: 12
+
+session:
+  whoami:
+    required_aal: highest_available
+
+identity:
+  default_schema_id: default
+  schemas:
+    - id: default
+      url: file:///etc/config/realstack/identity.schema.json

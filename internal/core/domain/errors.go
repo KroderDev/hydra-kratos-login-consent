@@ -10,6 +10,7 @@ var (
 	ErrInvalidScope          = errors.New("invalid scope")
 	ErrInvalidAudience       = errors.New("invalid audience")
 	ErrInvalidAssurance      = errors.New("invalid authenticator assurance")
+	ErrInvalidPrompt         = errors.New("invalid prompt")
 	ErrInvalidTransaction    = errors.New("invalid transaction")
 	ErrExpiredTransaction    = errors.New("expired transaction")
 	ErrReplay                = errors.New("replayed transaction")

@@ -1,0 +1,38 @@
+name: OIDC Conformance
+
+on:
+  workflow_dispatch:
+    inputs:
+      discovery_url:
+        description: "HTTPS OIDC discovery URL to verify"
+        required: false
+        type: string
+      suite_server:
+        description: "HTTPS OIDF conformance-suite API base URL"
+        required: false
+        type: string
+  schedule:
+    - cron: "17 3 * * *"
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oidc-conformance
+  cancel-in-progress: false
+
+jobs:
+  discovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CONFORMANCE_SERVER: ${{ inputs.suite_server || vars.CONFORMANCE_SERVER || 'https://www.certification.openid.net' }}
+      CONFORMANCE_DISCOVERY_URL: ${{ inputs.discovery_url || vars.CONFORMANCE_DISCOVERY_URL }}
+      CONFORMANCE_TOKEN: ${{ secrets.CONFORMANCE_TOKEN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Run OIDF discovery verification
+        run: bash scripts/conformance-discovery.sh

@@ -25,11 +25,14 @@ type Client struct {
 
 // LoginRequest is the Hydra login request needed by the provider flow.
 type LoginRequest struct {
-	Challenge    string
-	Client       Client
-	Skip         bool
-	Subject      string
-	RequestedAAL string
+	Challenge          string
+	Client             Client
+	Skip               bool
+	Subject            string
+	RequestedAAL       string
+	RequestedACRValues []string
+	Prompt             string
+	MaxAge             *int64
 }
 
 // ConsentRequest is the Hydra consent request needed by the provider flow.
@@ -40,6 +43,7 @@ type ConsentRequest struct {
 	RequestedScopes   []string
 	RequestedAudience []string
 	Skip              bool
+	Prompt            string
 }
 
 // LogoutRequest is the Hydra logout request needed by the provider flow.
@@ -59,6 +63,7 @@ type Session struct {
 	Subject                string
 	AAL                    string
 	AMR                    []string
+	AuthenticatedAt        time.Time
 	IdentityTraits         map[string]any
 	IdentityMetadataPublic map[string]any
 }
@@ -78,6 +83,10 @@ type Transaction struct {
 	ClientID          string
 	Subject           string
 	RequestedAAL      string
+	RequestedACR      string
+	Prompt            string
+	MaxAge            *int64
+	StartedAt         time.Time
 	RequestedScopes   []string
 	RequestedAudience []string
 	RequiredAAL       string

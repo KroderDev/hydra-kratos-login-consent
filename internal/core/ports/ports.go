@@ -30,14 +30,15 @@ type LoginStartInput struct {
 
 // ConsentInput contains the external UI's consent decision and browser proof.
 type ConsentInput struct {
-	Transaction  string
-	CSRFToken    string
-	BrowserState string
-	Decision     string
-	GrantScopes  []string
-	Credentials  SessionCredentials
-	Remember     bool
-	RememberFor  int64
+	Transaction   string
+	CSRFToken     string
+	BrowserState  string
+	Decision      string
+	GrantScopes   []string
+	GrantAudience []string
+	Credentials   SessionCredentials
+	Remember      bool
+	RememberFor   int64
 }
 
 // ConsentStartInput contains browser proof used to bind a consent transaction.
@@ -145,6 +146,7 @@ type PolicyInput struct {
 	RequestedScopes    []string
 	GrantedScopes      []string
 	RequestedAudiences []string
+	GrantedAudiences   []string
 	AAL                string
 	AMR                []string
 }

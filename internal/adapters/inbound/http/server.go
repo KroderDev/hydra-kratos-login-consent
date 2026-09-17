@@ -166,20 +166,22 @@ func (s *Server) handleConsentSubmit(w http.ResponseWriter, r *http.Request) {
 	csrfToken := strings.TrimSpace(r.Form.Get("csrf"))
 	decision := strings.ToLower(strings.TrimSpace(r.Form.Get("decision")))
 	grantScopes := formScopes(r.Form["grant_scope"])
+	grantAudience := formScopes(r.Form["grant_audience"])
 	remember, rememberFor, err := rememberOptions(r.Form.Get("remember"), r.Form.Get("remember_for"))
 	if err != nil {
 		s.writeError(w, r, err)
 		return
 	}
 	result, err := s.service.CompleteConsent(r.Context(), ports.ConsentInput{
-		Transaction:  transaction,
-		CSRFToken:    csrfToken,
-		BrowserState: s.browserStateCookie(r, consentBrowserStateCookie),
-		Decision:     decision,
-		GrantScopes:  grantScopes,
-		Credentials:  s.sessionCredentials(r),
-		Remember:     remember,
-		RememberFor:  rememberFor,
+		Transaction:   transaction,
+		CSRFToken:     csrfToken,
+		BrowserState:  s.browserStateCookie(r, consentBrowserStateCookie),
+		Decision:      decision,
+		GrantScopes:   grantScopes,
+		GrantAudience: grantAudience,
+		Credentials:   s.sessionCredentials(r),
+		Remember:      remember,
+		RememberFor:   rememberFor,
 	})
 	if err != nil {
 		s.writeError(w, r, err)
@@ -529,6 +531,7 @@ func statusForError(err error) int {
 		errors.Is(err, domain.ErrInvalidScope),
 		errors.Is(err, domain.ErrInvalidAudience),
 		errors.Is(err, domain.ErrInvalidAssurance),
+		errors.Is(err, domain.ErrInvalidPrompt),
 		errors.Is(err, domain.ErrInvalidTransaction),
 		errors.Is(err, domain.ErrExpiredTransaction),
 		errors.Is(err, domain.ErrReplay),

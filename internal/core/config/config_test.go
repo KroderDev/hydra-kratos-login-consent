@@ -81,6 +81,18 @@ func TestConfigExternalConsentRedirect(t *testing.T) {
 		t.Fatalf("scope = %q, want openid profile", got)
 	}
 
+	withAudience, err := cfg.ExternalConsentRedirectWithAudience("opaque-handle", "csrf-token", "Example Client", []string{"openid"}, []string{"https://api.example.test"})
+	if err != nil {
+		t.Fatalf("ExternalConsentRedirectWithAudience: %v", err)
+	}
+	withAudienceURL, err := url.Parse(withAudience)
+	if err != nil {
+		t.Fatalf("parse audience redirect: %v", err)
+	}
+	if got := withAudienceURL.Query().Get("audience"); got != "https://api.example.test" {
+		t.Fatalf("audience = %q, want https://api.example.test", got)
+	}
+
 	if _, err := cfg.ExternalConsentRedirect("", "csrf", "Client", nil); !errors.Is(err, domain.ErrInvalidTransaction) {
 		t.Fatalf("empty transaction error = %v, want invalid transaction", err)
 	}
@@ -576,6 +588,72 @@ func TestConfig_Security_NativeClientLoopbackIP(t *testing.T) {
 			}
 			if !tt.want && err == nil {
 				t.Fatalf("Validate accepted invalid loopback URI %q in secure environment", tt.uri)
+			}
+		})
+	}
+}
+
+func TestConfigResolveACR(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfig(t)
+	cfg.OIDCACRMappings = map[string]string{
+		"urn:example:aal3": "AAL3",
+	}
+	tests := []struct {
+		name    string
+		values  []string
+		wantAAL string
+		wantACR string
+		wantErr error
+	}{
+		{name: "empty", wantAAL: "", wantACR: ""},
+		{name: "built in", values: []string{"aal2"}, wantAAL: "aal2", wantACR: "aal2"},
+		{name: "built in is case insensitive", values: []string{" AAL1 "}, wantAAL: "aal1", wantACR: "AAL1"},
+		{name: "custom mapping", values: []string{"urn:example:aal3"}, wantAAL: "aal3", wantACR: "urn:example:aal3"},
+		{name: "later supported value", values: []string{"unsupported", "aal2"}, wantAAL: "aal2", wantACR: "aal2"},
+		{name: "blank value", values: []string{"aal1", " "}, wantErr: domain.ErrInvalidAssurance},
+		{name: "unsupported values", values: []string{"unsupported"}, wantErr: domain.ErrInvalidAssurance},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			aal, acr, err := cfg.ResolveACR(tt.values)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("ResolveACR(%q) error = %v, want %v", tt.values, err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if aal != tt.wantAAL || acr != tt.wantACR {
+				t.Fatalf("ResolveACR(%q) = %q, %q; want %q, %q", tt.values, aal, acr, tt.wantAAL, tt.wantACR)
+			}
+		})
+	}
+}
+
+func TestConfigValidateACRMappings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		mapping map[string]string
+		wantErr bool
+	}{
+		{name: "nil", mapping: nil},
+		{name: "valid", mapping: map[string]string{"urn:example:aal2": "aal2"}},
+		{name: "blank key", mapping: map[string]string{" ": "aal2"}, wantErr: true},
+		{name: "newline key", mapping: map[string]string{"urn:example\n": "aal2"}, wantErr: true},
+		{name: "unsupported aal", mapping: map[string]string{"urn:example:unknown": "aal4"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig(t)
+			cfg.OIDCACRMappings = tt.mapping
+			err := cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate error = %v, want error: %t", err, tt.wantErr)
 			}
 		})
 	}

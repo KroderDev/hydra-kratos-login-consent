@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/domain"
 	"github.com/kroderdev/hydra-kratos-login-consent/internal/core/ports"
@@ -26,7 +27,7 @@ func TestClient_ValidateSession(t *testing.T) {
 			t.Fatalf("session cookie = %#v, want session-value", cookie)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if _, err := w.Write([]byte(`{"active":true,"authenticator_assurance_level":"aal2","authentication_methods":[{"method":"oidc"},{"method":"totp"}],"identity":{"id":"operator-1","traits":{"email":"operator@example.com","name":{"given":"Operator"}},"metadata_public":{"role":"reader"},"metadata_admin":{"secret":"must-not-be-retained"},"credentials":{"password":{"identifiers":["operator@example.com"]}}},"raw_cookie":"must-not-be-retained"}`)); err != nil {
+		if _, err := w.Write([]byte(`{"active":true,"authenticator_assurance_level":"aal2","authenticated_at":"2026-01-01T00:00:00Z","authentication_methods":[{"method":"oidc"},{"method":"totp"}],"identity":{"id":"operator-1","traits":{"email":"operator@example.com","name":{"given":"Operator"}},"metadata_public":{"role":"reader"},"metadata_admin":{"secret":"must-not-be-retained"},"credentials":{"password":{"identifiers":["operator@example.com"]}}},"raw_cookie":"must-not-be-retained"}`)); err != nil {
 			t.Errorf("write session response: %v", err)
 		}
 	}))
@@ -49,6 +50,9 @@ func TestClient_ValidateSession(t *testing.T) {
 	}
 	if session.Subject != "operator-1" || session.AAL != "aal2" {
 		t.Fatalf("session = %#v, want operator-1/aal2", session)
+	}
+	if want := "2026-01-01T00:00:00Z"; session.AuthenticatedAt.Format(time.RFC3339) != want {
+		t.Fatalf("authenticated at = %s, want %s", session.AuthenticatedAt.Format(time.RFC3339), want)
 	}
 	if len(session.AMR) != 2 || session.AMR[1] != "totp" {
 		t.Fatalf("amr = %#v, want oidc/totp", session.AMR)

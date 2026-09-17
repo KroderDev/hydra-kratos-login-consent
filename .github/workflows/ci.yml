@@ -42,6 +42,18 @@ jobs:
       - name: End-to-end provider contract
         run: go test -race -tags=integration -count=1 -shuffle=on ./...
 
+  realstack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Hydra, Kratos, Redis, and provider OIDC smoke test
+        run: make e2e-realstack
+
   lint:
     runs-on: ubuntu-latest
     steps:

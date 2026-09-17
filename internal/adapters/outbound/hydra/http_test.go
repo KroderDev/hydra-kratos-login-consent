@@ -29,8 +29,10 @@ func TestClient_LoginRequests(t *testing.T) {
 					"client_name":   "Example Client",
 					"redirect_uris": []string{"https://client.example/callback"},
 				},
+				"request_url":  "https://hydra.example/oauth2/auth",
 				"oidc_context": map[string]any{"acr_values": []string{"aal2"}},
 				"skip":         false,
+				"subject":      "",
 			})
 		case r.Method == http.MethodPut && r.URL.Path == "/admin/oauth2/auth/requests/login/accept":
 			var body map[string]any

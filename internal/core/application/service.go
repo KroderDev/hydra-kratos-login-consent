@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +60,13 @@ type LoginInput = ports.LoginInput
 // LogoutInput is the application service's logout completion input.
 type LogoutInput = ports.LogoutInput
 
+type promptSet struct {
+	login         bool
+	none          bool
+	consent       bool
+	selectAccount bool
+}
+
 // NewService validates configuration and wires the application ports.
 func NewService(cfg config.Config, dependencies Dependencies) (*Service, error) {
 	if err := cfg.Validate(); err != nil {
@@ -104,11 +112,28 @@ func (s *Service) StartLogin(ctx context.Context, challenge string, input ports.
 		return RedirectResult{}, domain.ErrUnauthenticated
 	}
 
-	if request.RequestedAAL != "" && !domain.SupportedAAL(request.RequestedAAL) {
+	acrValues := request.RequestedACRValues
+	if len(acrValues) == 0 && request.RequestedAAL != "" {
+		acrValues = []string{request.RequestedAAL}
+	}
+	requestedAAL, requestedACR, err := s.cfg.ResolveACR(acrValues)
+	if err != nil {
+		return RedirectResult{}, err
+	}
+	prompts, err := parsePrompt(request.Prompt)
+	if err != nil {
+		return RedirectResult{}, domain.ErrInvalidPrompt
+	}
+	if request.MaxAge != nil && *request.MaxAge < 0 {
 		return RedirectResult{}, domain.ErrInvalidAssurance
 	}
-	requiredAAL := domain.HigherAAL(s.cfg.RequiredAAL, request.RequestedAAL)
-	if request.Skip && requiredAAL == "" {
+	requiredAAL := domain.HigherAAL(s.cfg.RequiredAAL, requestedAAL)
+	requiresInteraction := !request.Skip || requiredAAL != ""
+	if prompts.none && requiresInteraction {
+		return s.rejectLogin(ctx, challenge, "login_required", "The login requires user interaction.")
+	}
+	forceLogin := prompts.login || prompts.selectAccount
+	if request.Skip && !forceLogin && requiredAAL == "" {
 		allowed, err := s.policy.AuthorizeLogin(ctx, ports.PolicyInput{
 			Subject:  request.Subject,
 			ClientID: client.ID,
@@ -119,18 +144,26 @@ func (s *Service) StartLogin(ctx context.Context, challenge string, input ports.
 		if !allowed {
 			return s.rejectLogin(ctx, challenge, "access_denied", "The login policy denied access.")
 		}
-		redirect, err := s.login.AcceptLogin(ctx, challenge, ports.LoginAcceptance{Subject: request.Subject})
+		redirect, err := s.login.AcceptLogin(ctx, challenge, ports.LoginAcceptance{
+			Subject: request.Subject,
+			ACR:     requestedACR,
+		})
 		return s.hydraRedirect(redirect, err)
 	}
 
+	startedAt := s.now()
 	transaction := domain.Transaction{
 		Flow:         domain.FlowLogin,
 		Challenge:    challenge,
 		ClientID:     client.ID,
 		Subject:      request.Subject,
-		RequestedAAL: request.RequestedAAL,
+		RequestedAAL: requestedAAL,
+		RequestedACR: requestedACR,
+		Prompt:       request.Prompt,
+		MaxAge:       cloneInt64(request.MaxAge),
+		StartedAt:    startedAt,
 		RequiredAAL:  requiredAAL,
-		ExpiresAt:    s.now().Add(s.cfg.TransactionTTL),
+		ExpiresAt:    startedAt.Add(s.cfg.TransactionTTL),
 	}
 	transaction.BrowserState, err = s.startBrowserState(input.BrowserState)
 	if err != nil {
@@ -145,6 +178,15 @@ func (s *Service) StartLogin(ctx context.Context, challenge string, input ports.
 		return RedirectResult{}, err
 	}
 	redirect, err := s.cfg.ExternalRedirect(domain.FlowLogin, handle, transaction.CSRFToken)
+	if err == nil && (forceLogin || (request.MaxAge != nil && *request.MaxAge == 0)) {
+		redirect, err = addQueryValue(redirect, "force_reauth", "true")
+	}
+	if err == nil && request.MaxAge != nil {
+		redirect, err = addQueryValue(redirect, "max_age", strconv.FormatInt(*request.MaxAge, 10))
+	}
+	if err == nil && requiredAAL != "" {
+		redirect, err = addQueryValue(redirect, "aal", requiredAAL)
+	}
 	return RedirectResult{URL: redirect, BrowserState: transaction.BrowserState}, err
 }
 
@@ -167,6 +209,9 @@ func (s *Service) CompleteLogin(ctx context.Context, handle string, input ports.
 	if transaction.Subject != "" && session.Subject != transaction.Subject {
 		return s.rejectLoginFailure(ctx, transaction.Challenge, domain.ErrUnauthenticated, domain.ErrUnauthenticated)
 	}
+	if err := validateLoginFreshness(transaction, session, s.now()); err != nil {
+		return s.rejectLogin(ctx, transaction.Challenge, "login_required", "The login session is not fresh enough.")
+	}
 	if !domain.AALAtLeast(session.AAL, domain.HigherAAL(s.cfg.RequiredAAL, transaction.RequestedAAL)) {
 		return s.rejectLoginFailure(ctx, transaction.Challenge, domain.ErrInsufficientAssurance, domain.ErrInsufficientAssurance)
 	}
@@ -184,7 +229,7 @@ func (s *Service) CompleteLogin(ctx context.Context, handle string, input ports.
 	}
 	redirect, err := s.login.AcceptLogin(ctx, transaction.Challenge, ports.LoginAcceptance{
 		Subject:     session.Subject,
-		ACR:         session.AAL,
+		ACR:         loginAcceptanceACR(transaction, session),
 		AMR:         append([]string(nil), session.AMR...),
 		Remember:    input.Remember,
 		RememberFor: input.RememberFor,
@@ -217,6 +262,13 @@ func (s *Service) StartConsent(ctx context.Context, challenge string, input port
 	if err := validateAudiences(client, request.RequestedAudience); err != nil {
 		return RedirectResult{}, err
 	}
+	prompts, err := parsePrompt(request.Prompt)
+	if err != nil {
+		return RedirectResult{}, domain.ErrInvalidPrompt
+	}
+	if prompts.none {
+		return s.rejectConsent(ctx, challenge, "consent_required", "The consent requires user interaction.")
+	}
 	transaction := domain.Transaction{
 		Flow:              domain.FlowConsent,
 		Challenge:         challenge,
@@ -239,8 +291,8 @@ func (s *Service) StartConsent(ctx context.Context, challenge string, input port
 	if err != nil {
 		return RedirectResult{}, err
 	}
-	redirect, err := s.cfg.ExternalConsentRedirect(handle, transaction.CSRFToken, request.Client.Name, request.RequestedScopes)
-	if err == nil && (request.Skip || client.SkipConsent) {
+	redirect, err := s.cfg.ExternalConsentRedirectWithAudience(handle, transaction.CSRFToken, request.Client.Name, request.RequestedScopes, request.RequestedAudience)
+	if err == nil && !prompts.consent && (request.Skip || client.SkipConsent) {
 		redirect, err = addQueryValue(redirect, "skip_consent", "true")
 	}
 	return RedirectResult{URL: redirect, BrowserState: transaction.BrowserState}, err
@@ -266,6 +318,13 @@ func (s *Service) CompleteConsent(ctx context.Context, input ConsentInput) (Redi
 	}
 	if err := validateRequestedSubset(transaction.RequestedScopes, input.GrantScopes); err != nil {
 		return s.rejectConsentFailure(ctx, transaction.Challenge, domain.ErrInvalidScope, err)
+	}
+	grantAudiences := input.GrantAudience
+	if len(grantAudiences) == 0 {
+		grantAudiences = transaction.RequestedAudience
+	}
+	if err := validateRequestedSubset(transaction.RequestedAudience, grantAudiences); err != nil {
+		return s.rejectConsentFailure(ctx, transaction.Challenge, domain.ErrInvalidAudience, err)
 	}
 	session, err := s.kratos.ValidateSession(ctx, input.Credentials)
 	if err != nil {
@@ -295,7 +354,7 @@ func (s *Service) CompleteConsent(ctx context.Context, input ConsentInput) (Redi
 		Subject:           transaction.Subject,
 		RequestedScopes:   transaction.RequestedScopes,
 		RequestedAudience: transaction.RequestedAudience,
-	}, client, session, input.GrantScopes, input.Remember, input.RememberFor)
+	}, client, session, input.GrantScopes, grantAudiences, input.Remember, input.RememberFor)
 }
 
 // StartLogout validates a Hydra logout challenge and starts a browser-bound
@@ -437,7 +496,7 @@ func (s *Service) validateClient(client domain.Client) (config.Client, error) {
 	return configured, nil
 }
 
-func (s *Service) acceptConsentDecision(ctx context.Context, request domain.ConsentRequest, client config.Client, session domain.Session, scopes []string, remember bool, rememberFor int64) (RedirectResult, error) {
+func (s *Service) acceptConsentDecision(ctx context.Context, request domain.ConsentRequest, client config.Client, session domain.Session, scopes, audiences []string, remember bool, rememberFor int64) (RedirectResult, error) {
 	if err := validateRemember(remember, rememberFor); err != nil {
 		return RedirectResult{}, err
 	}
@@ -450,12 +509,19 @@ func (s *Service) acceptConsentDecision(ctx context.Context, request domain.Cons
 	if err := validateRequestedSubset(request.RequestedScopes, scopes); err != nil {
 		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrInvalidScope, err)
 	}
+	if len(audiences) == 0 {
+		audiences = request.RequestedAudience
+	}
+	if err := validateRequestedSubset(request.RequestedAudience, audiences); err != nil {
+		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrInvalidAudience, err)
+	}
 	decision, err := s.policy.AuthorizeConsent(ctx, ports.PolicyInput{
 		Subject:            request.Subject,
 		ClientID:           client.ID,
 		RequestedScopes:    append([]string(nil), request.RequestedScopes...),
 		GrantedScopes:      append([]string(nil), scopes...),
 		RequestedAudiences: append([]string(nil), request.RequestedAudience...),
+		GrantedAudiences:   append([]string(nil), audiences...),
 		AAL:                session.AAL,
 		AMR:                append([]string(nil), session.AMR...),
 	})
@@ -468,7 +534,7 @@ func (s *Service) acceptConsentDecision(ctx context.Context, request domain.Cons
 	if err := validateRequestedSubset(scopes, decision.GrantedScopes); err != nil {
 		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrUpstream, err)
 	}
-	if err := validateAudienceSubset(request.RequestedAudience, decision.GrantedAudiences); err != nil {
+	if err := validateAudienceSubset(audiences, decision.GrantedAudiences); err != nil {
 		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrUpstream, err)
 	}
 	claims := s.filterClaims(client, decision.Claims, session, decision.GrantedScopes)
@@ -579,6 +645,93 @@ func addQueryValue(target, name, value string) (string, error) {
 	query.Set(name, value)
 	parsed.RawQuery = query.Encode()
 	return parsed.String(), nil
+}
+
+func cloneInt64(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func parsePrompt(value string) (promptSet, error) {
+	var prompts promptSet
+	seen := make(map[string]struct{})
+	for _, prompt := range strings.Fields(value) {
+		if _, ok := seen[prompt]; ok {
+			return promptSet{}, domain.ErrInvalidPrompt
+		}
+		seen[prompt] = struct{}{}
+		switch prompt {
+		case "login":
+			prompts.login = true
+		case "none":
+			prompts.none = true
+		case "consent":
+			prompts.consent = true
+		case "select_account":
+			prompts.selectAccount = true
+		default:
+			return promptSet{}, domain.ErrInvalidPrompt
+		}
+	}
+	if prompts.none && len(seen) != 1 {
+		return promptSet{}, domain.ErrInvalidPrompt
+	}
+	return prompts, nil
+}
+
+func promptIncludes(prompt, value string) bool {
+	for _, item := range strings.Fields(prompt) {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func validateLoginFreshness(transaction domain.Transaction, session domain.Session, now time.Time) error {
+	if !promptIncludes(transaction.Prompt, "login") && transaction.MaxAge == nil {
+		return nil
+	}
+	if session.AuthenticatedAt.IsZero() || session.AuthenticatedAt.After(now) {
+		return domain.ErrInvalidAssurance
+	}
+	if promptIncludes(transaction.Prompt, "login") && !session.AuthenticatedAt.After(transaction.StartedAt) {
+		return domain.ErrInvalidAssurance
+	}
+	if transaction.MaxAge == nil {
+		return nil
+	}
+	if *transaction.MaxAge < 0 {
+		return domain.ErrInvalidAssurance
+	}
+	if *transaction.MaxAge == 0 {
+		if !session.AuthenticatedAt.After(transaction.StartedAt) {
+			return domain.ErrInvalidAssurance
+		}
+		return nil
+	}
+	age := now.Sub(session.AuthenticatedAt)
+	if age < 0 {
+		return domain.ErrInvalidAssurance
+	}
+	ageSeconds := int64(age / time.Second)
+	if age%time.Second != 0 {
+		ageSeconds++
+	}
+	if ageSeconds > *transaction.MaxAge {
+		return domain.ErrInvalidAssurance
+	}
+	return nil
+}
+
+func loginAcceptanceACR(transaction domain.Transaction, session domain.Session) string {
+	if transaction.RequestedACR != "" {
+		return transaction.RequestedACR
+	}
+	return session.AAL
 }
 
 // validateChallenge verifies that a challenge is non-empty, within the maximum allowed length, and contains no control characters.

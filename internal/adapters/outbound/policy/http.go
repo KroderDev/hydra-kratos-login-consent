@@ -69,6 +69,7 @@ func (c *HTTP) authorize(ctx context.Context, operation string, input ports.Poli
 		RequestedScopes:    contractStrings(input.RequestedScopes),
 		GrantedScopes:      contractStrings(input.GrantedScopes),
 		RequestedAudiences: contractStrings(input.RequestedAudiences),
+		GrantedAudiences:   contractStrings(input.GrantedAudiences),
 		AAL:                input.AAL,
 		AMR:                contractStrings(input.AMR),
 	}
@@ -118,6 +119,7 @@ type policyRequest struct {
 	RequestedScopes    []string `json:"requested_scopes"`
 	GrantedScopes      []string `json:"granted_scopes"`
 	RequestedAudiences []string `json:"requested_audiences"`
+	GrantedAudiences   []string `json:"granted_audiences"`
 	AAL                string   `json:"aal"`
 	AMR                []string `json:"amr"`
 }
@@ -151,7 +153,11 @@ func (r policyResponse) decision(input ports.PolicyInput) (ports.ConsentDecision
 		}
 		return ports.ConsentDecision{}, nil
 	}
-	if !subset(*r.GrantedScopes, input.GrantedScopes) || !subset(*r.GrantedAudiences, input.RequestedAudiences) {
+	grantedAudiences := input.GrantedAudiences
+	if len(grantedAudiences) == 0 {
+		grantedAudiences = input.RequestedAudiences
+	}
+	if !subset(*r.GrantedScopes, input.GrantedScopes) || !subset(*r.GrantedAudiences, grantedAudiences) {
 		return ports.ConsentDecision{}, fmt.Errorf("%w: policy response expands requested grants", domain.ErrUpstream)
 	}
 	return ports.ConsentDecision{

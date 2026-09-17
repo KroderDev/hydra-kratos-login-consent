@@ -1,0 +1,35 @@
+version: v26.2.0
+
+dsn: sqlite:///var/lib/sqlite/db.sqlite?_fk=true
+
+log:
+  level: info
+  format: json
+  leak_sensitive_values: false
+
+urls:
+  self:
+    issuer: http://127.0.0.1:4444/
+    public: http://127.0.0.1:4444/
+    admin: http://hydra:4445/
+  login: http://127.0.0.1:8080/login
+  consent: http://127.0.0.1:8080/consent
+  logout: http://127.0.0.1:8080/logout
+
+# Secrets are supplied through Compose environment variables.
+secrets: {}
+
+oidc:
+  subject_identifiers:
+    supported_types:
+      - public
+      - pairwise
+    pairwise: {}
+
+oauth2:
+  pkce:
+    enforced_for_public_clients: true
+  hashers:
+    algorithm: bcrypt
+    bcrypt:
+      cost: 12

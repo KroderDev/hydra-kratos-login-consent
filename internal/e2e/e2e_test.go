@@ -516,8 +516,10 @@ func (f *hydraFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
 				"client_name":   "Example Client",
 				"redirect_uris": []string{"https://client.example/callback"},
 			},
+			"request_url":  "https://hydra.example/oauth2/auth",
 			"skip":         false,
 			"oidc_context": map[string]any{"acr_values": []string{"aal2"}},
+			"subject":      "",
 		})
 	case r.Method == http.MethodPut && r.URL.Path == "/admin/oauth2/auth/requests/login/accept":
 		var body struct {

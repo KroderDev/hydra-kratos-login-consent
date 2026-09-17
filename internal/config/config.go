@@ -91,6 +91,10 @@ func Load() (coreconfig.Config, error) {
 	if err != nil {
 		return coreconfig.Config{}, fmt.Errorf("parse oidc_identity_claim_mappings: %w", err)
 	}
+	acrMappings, err := parseACRMappings(os.Getenv("OIDC_ACR_MAPPINGS"))
+	if err != nil {
+		return coreconfig.Config{}, err
+	}
 
 	clients := map[string]coreconfig.Client{}
 	if raw := strings.TrimSpace(os.Getenv("ALLOWED_CLIENTS")); raw != "" {
@@ -122,11 +126,24 @@ func Load() (coreconfig.Config, error) {
 		PolicyBackend:             coreconfig.PolicyBackend(policyBackend),
 		PolicyURL:                 policyURL,
 		OIDCIdentityClaimMappings: identityClaimMappings,
+		OIDCACRMappings:           acrMappings,
 	}
 	if err := cfg.Validate(); err != nil {
 		return coreconfig.Config{}, err
 	}
 	return cfg, nil
+}
+
+func parseACRMappings(raw string) (map[string]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var mappings map[string]string
+	if err := json.Unmarshal([]byte(raw), &mappings); err != nil {
+		return nil, fmt.Errorf("parse oidc_acr_mappings: %w", err)
+	}
+	return mappings, nil
 }
 
 func requiredURL(name string) (*url.URL, error) {

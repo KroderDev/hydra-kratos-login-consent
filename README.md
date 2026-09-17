@@ -151,7 +151,10 @@ in CI. `make e2e-docker` runs the same contract against a pinned Redis
 container on localhost through Docker host networking on Linux; set
 `E2E_REDIS_URL` when running the suite against a shared test Redis. Live Hydra
 and Kratos container tests remain deployment-level tests and must use pinned
-service images and runtime configuration.
+service images and runtime configuration. See the [real-stack integration
+guide](docs/realstack.md) for the Compose-backed Hydra/Kratos/Redis OIDC smoke
+test. The non-interactive [OIDF conformance guide](docs/conformance.md)
+documents the pinned discovery gate and the manual-only authenticated plan.
 
 ## Container Image
 

@@ -8,3 +8,5 @@
 - [Remote policy contract](policy-contract.md)
 - [Container image](container.md)
 - [Image release and verification](release.md)
+- [Real Hydra/Kratos integration stack](realstack.md)
+- [OpenID Foundation conformance](conformance.md)

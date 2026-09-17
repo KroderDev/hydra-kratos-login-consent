@@ -1,0 +1,234 @@
+services:
+  redis:
+    image: redis:8.10.1-alpine@sha256:becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  hydra-sqlite-init:
+    image: alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+    user: "0:0"
+    command: ["sh", "-eu", "-c", "chown 65532:65532 /var/lib/sqlite"]
+    volumes:
+      - hydra-sqlite:/var/lib/sqlite
+
+  hydra-migrate:
+    image: oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9
+    command: ["migrate", "sql", "up", "-c", "/etc/config/realstack/hydra.yml", "-e", "--yes"]
+    depends_on:
+      hydra-sqlite-init:
+        condition: service_completed_successfully
+    environment:
+      DSN: sqlite:///var/lib/sqlite/db.sqlite?_fk=true
+      SECRETS_SYSTEM: "${REALSTACK_HYDRA_SYSTEM_SECRET:?REALSTACK_HYDRA_SYSTEM_SECRET must be set}"
+      OIDC_SUBJECT_IDENTIFIERS_PAIRWISE_SALT: "${REALSTACK_HYDRA_PAIRWISE_SALT:?REALSTACK_HYDRA_PAIRWISE_SALT must be set}"
+    volumes:
+      - hydra-sqlite:/var/lib/sqlite
+      - ./realstack/config:/etc/config/realstack:ro
+
+  hydra:
+    image: oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9
+    command: ["serve", "-c", "/etc/config/realstack/hydra.yml", "all", "--dev"]
+    depends_on:
+      hydra-migrate:
+        condition: service_completed_successfully
+    environment:
+      DSN: sqlite:///var/lib/sqlite/db.sqlite?_fk=true
+      SECRETS_SYSTEM: "${REALSTACK_HYDRA_SYSTEM_SECRET:?REALSTACK_HYDRA_SYSTEM_SECRET must be set}"
+      OIDC_SUBJECT_IDENTIFIERS_PAIRWISE_SALT: "${REALSTACK_HYDRA_PAIRWISE_SALT:?REALSTACK_HYDRA_PAIRWISE_SALT must be set}"
+      URLS_LOGIN: "http://127.0.0.1:${REALSTACK_PROVIDER_PORT:-8080}/login"
+      URLS_CONSENT: "http://127.0.0.1:${REALSTACK_PROVIDER_PORT:-8080}/consent"
+      URLS_LOGOUT: "http://127.0.0.1:${REALSTACK_PROVIDER_PORT:-8080}/logout"
+    volumes:
+      - hydra-sqlite:/var/lib/sqlite
+      - ./realstack/config:/etc/config/realstack:ro
+    ports:
+      - "127.0.0.1:4444:4444"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:4445/health/ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+      start_period: 3s
+
+  hydra-init:
+    image: oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9
+    depends_on:
+      hydra:
+        condition: service_healthy
+    environment:
+      HYDRA_ENDPOINT: http://hydra:4445
+      REALSTACK_CLIENT_SECRET: "${REALSTACK_CLIENT_SECRET:?REALSTACK_CLIENT_SECRET must be set}"
+    entrypoint: ["/bin/sh", "-eu", "-c"]
+    command:
+      - >-
+        if hydra get oauth2-client realstack-client --endpoint "$${HYDRA_ENDPOINT}" --quiet >/dev/null 2>&1; then
+          exit 0;
+        fi;
+        hydra create oauth2-client
+        --endpoint "$${HYDRA_ENDPOINT}"
+        --quiet
+        --id realstack-client
+        --secret "$${REALSTACK_CLIENT_SECRET}"
+        --name realstack
+        --grant-type authorization_code
+        --response-type code
+        --scope openid,profile,email
+        --audience https://api.example.test
+        --redirect-uri http://127.0.0.1:5555/callback
+        --post-logout-callback http://127.0.0.1:5555/logout-callback
+        --token-endpoint-auth-method client_secret_basic
+        --subject-type pairwise
+        --format json >/dev/null
+
+  kratos-migrate:
+    image: oryd/kratos:v26.2.0@sha256:2a13bb8d362c7a7ae33bd7c0f5168aee46921f15c916a06346db91c06dc76643
+    command: ["migrate", "sql", "-c", "/etc/config/realstack/kratos.yml", "-e", "--yes"]
+    depends_on:
+      kratos-sqlite-init:
+        condition: service_completed_successfully
+    environment:
+      DSN: sqlite:///var/lib/sqlite/db.sqlite?_fk=true
+      SECRETS_COOKIE: "${REALSTACK_KRATOS_COOKIE_SECRET:?REALSTACK_KRATOS_COOKIE_SECRET must be set}"
+      SECRETS_CIPHER: "${REALSTACK_KRATOS_CIPHER_SECRET:?REALSTACK_KRATOS_CIPHER_SECRET must be set}"
+      SELFSERVICE_ALLOWED_RETURN_URLS: >-
+        ["http://127.0.0.1:3000/","http://127.0.0.1:3000/login","http://127.0.0.1:3000/settings","http://127.0.0.1:3000/logout/complete","http://127.0.0.1:${REALSTACK_PROVIDER_PORT:-8080}/login/callback"]
+    volumes:
+      - kratos-sqlite:/var/lib/sqlite
+      - ./realstack/config:/etc/config/realstack:ro
+
+  kratos-sqlite-init:
+    image: alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+    user: "0:0"
+    command: ["sh", "-eu", "-c", "chown 10000:10000 /var/lib/sqlite"]
+    volumes:
+      - kratos-sqlite:/var/lib/sqlite
+
+  kratos:
+    image: oryd/kratos:v26.2.0@sha256:2a13bb8d362c7a7ae33bd7c0f5168aee46921f15c916a06346db91c06dc76643
+    command: ["serve", "-c", "/etc/config/realstack/kratos.yml", "--dev"]
+    depends_on:
+      kratos-migrate:
+        condition: service_completed_successfully
+    environment:
+      DSN: sqlite:///var/lib/sqlite/db.sqlite?_fk=true
+      SECRETS_COOKIE: "${REALSTACK_KRATOS_COOKIE_SECRET:?REALSTACK_KRATOS_COOKIE_SECRET must be set}"
+      SECRETS_CIPHER: "${REALSTACK_KRATOS_CIPHER_SECRET:?REALSTACK_KRATOS_CIPHER_SECRET must be set}"
+      SELFSERVICE_ALLOWED_RETURN_URLS: '["http://127.0.0.1:3000/","http://127.0.0.1:3000/login","http://127.0.0.1:3000/settings","http://127.0.0.1:3000/logout/complete","http://127.0.0.1:${REALSTACK_PROVIDER_PORT:-8080}/login/callback"]'
+    volumes:
+      - kratos-sqlite:/var/lib/sqlite
+      - ./realstack/config:/etc/config/realstack:ro
+    ports:
+      - "127.0.0.1:4433:4433"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:4434/health/ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+      start_period: 3s
+
+  kratos-seed:
+    build:
+      context: ./realstack/bootstrap
+    depends_on:
+      kratos:
+        condition: service_healthy
+    environment:
+      KRATOS_PUBLIC_URL: http://kratos:4433
+      KRATOS_ADMIN_URL: http://kratos:4434
+      REALSTACK_OPERATOR_EMAIL: operator@example.com
+      REALSTACK_DENIED_EMAIL: basic@example.com
+      REALSTACK_PASSWORD: "${REALSTACK_PASSWORD:?REALSTACK_PASSWORD must be set}"
+      REALSTACK_BASIC_PASSWORD: "${REALSTACK_BASIC_PASSWORD:?REALSTACK_BASIC_PASSWORD must be set}"
+
+  policy:
+    build:
+      context: ./realstack/policy
+    depends_on:
+      kratos-seed:
+        condition: service_completed_successfully
+    environment:
+      REALSTACK_POLICY_TOKEN: "${REALSTACK_POLICY_TOKEN:?REALSTACK_POLICY_TOKEN must be set}"
+      REALSTACK_POLICY_CLIENT_ID: realstack-client
+      REALSTACK_POLICY_OPERATOR_EMAIL: operator@example.com
+      REALSTACK_POLICY_DENY_EMAIL: basic@example.com
+      REALSTACK_KRATOS_ADMIN_URL: http://kratos:4434
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:8090/healthz"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+      start_period: 1s
+
+  ui:
+    build:
+      context: ./realstack/ui
+    depends_on:
+      kratos:
+        condition: service_healthy
+    environment:
+      KRATOS_INTERNAL_URL: http://kratos:4433
+      KRATOS_BROWSER_URL: http://127.0.0.1:4433
+      KRATOS_LOGIN_AAL: aal1
+      PROVIDER_BROWSER_URL: http://127.0.0.1:${REALSTACK_PROVIDER_PORT:-8080}
+      UI_BROWSER_URL: http://127.0.0.1:3000
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:3000/healthz"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+      start_period: 1s
+
+  provider:
+    build:
+      context: .
+      args:
+        RUN_INTEGRATION_TESTS: "false"
+    depends_on:
+      hydra-init:
+        condition: service_completed_successfully
+      kratos-seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      policy:
+        condition: service_healthy
+      ui:
+        condition: service_healthy
+    environment:
+      LISTEN_ADDR: :8080
+      PUBLIC_URL: http://127.0.0.1:${REALSTACK_PROVIDER_PORT:-8080}
+      EXTERNAL_UI_URL: http://127.0.0.1:3000/login
+      HYDRA_ADMIN_URL: http://hydra:4445
+      HYDRA_PUBLIC_URL: http://127.0.0.1:4444
+      KRATOS_PUBLIC_URL: http://kratos:4433
+      KRATOS_SESSION_COOKIE: ory_kratos_session
+      REQUIRED_AAL: aal1
+      TRANSACTION_TTL: 5m
+      MAX_CHALLENGE_LENGTH: 2048
+      ENVIRONMENT: development
+      POLICY_BACKEND: http
+      POLICY_URL: http://policy:8090/v1/authorize
+      POLICY_AUTH_TOKEN: "${REALSTACK_POLICY_TOKEN:?REALSTACK_POLICY_TOKEN must be set}"
+      ALLOWED_CLIENTS: '{"realstack-client":{"allowed_redirect_uris":["http://127.0.0.1:5555/callback"],"allowed_post_logout_redirect_uris":["http://127.0.0.1:5555/logout-callback"],"allowed_scopes":["openid","profile","email"],"allowed_audiences":["https://api.example.test"],"allowed_id_token_claims":{"email":["email"],"role":["profile"]},"allowed_access_token_claims":{"tenant":[]}}}'
+      OIDC_IDENTITY_CLAIM_MAPPINGS: '{"email":{"source":"/traits/email","type":"string","format":"email"}}'
+      STATE_STORE: redis
+      REDIS_URL: redis://redis:6379/0
+      REDIS_KEY_PREFIX: "realstack:transaction:"
+    ports:
+      - "127.0.0.1:${REALSTACK_PROVIDER_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=-", "http://127.0.0.1:8080/healthz"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+      start_period: 3s
+
+volumes:
+  hydra-sqlite:
+  kratos-sqlite:

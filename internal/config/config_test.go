@@ -102,6 +102,20 @@ func TestLoadParsesOIDCIdentityClaimMappings(t *testing.T) {
 }
 
 //nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestLoadParsesOIDCACRMappings(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("OIDC_ACR_MAPPINGS", `{"urn:example:aal3":"aal3"}`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.OIDCACRMappings["urn:example:aal3"]; got != "aal3" {
+		t.Fatalf("OIDC ACR mapping = %q, want aal3", got)
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
 func TestLoadParsesHTTPPolicyConfiguration(t *testing.T) {
 	setRequiredEnvironment(t)
 	t.Setenv("POLICY_BACKEND", " HTTP ")
@@ -155,6 +169,8 @@ func TestLoadRejectsMalformedConfiguredValues(t *testing.T) {
 		{name: "policy URL fragment", key: "POLICY_URL", value: "https://policy.example/v1/authorize#fragment"},
 		{name: "identity mapping pointer", key: "OIDC_IDENTITY_CLAIM_MAPPINGS", value: `{"email":{"sources":["traits/email"],"type":"string","format":"email"}}`},
 		{name: "identity reserved claim", key: "OIDC_IDENTITY_CLAIM_MAPPINGS", value: `{"sub":{"sources":["/traits/id"],"type":"string"}}`},
+		{name: "malformed acr mappings", key: "OIDC_ACR_MAPPINGS", value: "{"},
+		{name: "unsupported acr mapping aal", key: "OIDC_ACR_MAPPINGS", value: `{"urn:example:unknown":"aal4"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -184,5 +200,6 @@ func setRequiredEnvironment(t *testing.T) {
 	t.Setenv("POLICY_URL", "")
 	t.Setenv("POLICY_AUTH_TOKEN", "")
 	t.Setenv("OIDC_IDENTITY_CLAIM_MAPPINGS", "")
+	t.Setenv("OIDC_ACR_MAPPINGS", "")
 	t.Setenv("MAX_CHALLENGE_LENGTH", "")
 }

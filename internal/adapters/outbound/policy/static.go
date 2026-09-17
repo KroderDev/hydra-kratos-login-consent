@@ -66,8 +66,12 @@ func (p *Static) AuthorizeConsent(_ context.Context, input ports.PolicyInput) (p
 	}
 	decision := ports.ConsentDecision{Allowed: allowed}
 	if allowed {
+		grantedAudiences := input.GrantedAudiences
+		if len(grantedAudiences) == 0 {
+			grantedAudiences = input.RequestedAudiences
+		}
 		decision.GrantedScopes = cloneStrings(input.GrantedScopes)
-		decision.GrantedAudiences = cloneStrings(input.RequestedAudiences)
+		decision.GrantedAudiences = cloneStrings(grantedAudiences)
 		decision.Claims = cloneClaims(p.Claims)
 	}
 	return decision, nil

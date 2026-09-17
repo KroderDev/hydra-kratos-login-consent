@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.6.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.5.4...v0.6.0) (2026-09-17)
+
+
+### Features
+
+* add real Hydra/Kratos integration stack and OIDF conformance gate ([383ec9b](https://github.com/KroderDev/hydra-kratos-login-consent/commit/383ec9bc93dc007977e4b922ba474d8e91e7cbc9))
+* real Hydra/Kratos stack, independent OIDC RP tests, and OIDF conformance gate ([766fe01](https://github.com/KroderDev/hydra-kratos-login-consent/commit/766fe016cce8278f4d70612e7d976cd6bbd62771))
+
+
+### Bug Fixes
+
+* address PR review feedback on silent consent and real stack ([02152f7](https://github.com/KroderDev/hydra-kratos-login-consent/commit/02152f78a7c9c560771bce15e0986e55f41b1b18))
+
+
+### Dependencies
+
+* **deps:** bump github.com/alicebob/miniredis/v2 ([0136cae](https://github.com/KroderDev/hydra-kratos-login-consent/commit/0136caec372affcd008b3a8c604a8fdaca73afec))
+* **deps:** bump golang in the docker-non-major group ([9a2579e](https://github.com/KroderDev/hydra-kratos-login-consent/commit/9a2579eab52951768500b6790e17b13063827164))
+* **deps:** bump the actions-non-major group across 1 directory with 3 updates ([d5f12e1](https://github.com/KroderDev/hydra-kratos-login-consent/commit/d5f12e1a3e9d8a165ddfe703e014466d17262537))
+
+
+### Documentation
+
+* clarify OIDC login, consent, and realstack helper behavior in Go comments ([8ad6611](https://github.com/KroderDev/hydra-kratos-login-consent/commit/8ad6611780146621441c9cac8a4cc3e6304ac1b0))
+
+
+### Tests
+
+* cover Hydra failure paths and consent audience validation ([61e206f](https://github.com/KroderDev/hydra-kratos-login-consent/commit/61e206f2614feffa28fc2b447ffb17a30887fba2))
+
 ## [0.5.4](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.5.3...v0.5.4) (2026-09-06)
 
 

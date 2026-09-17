@@ -287,6 +287,55 @@ func TestClient_ErrorPaths(t *testing.T) {
 	}
 }
 
+func TestClient_EmptySuccessBodiesFailClosed(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	client, err := New(baseURL, server.Client(), "")
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+
+	if _, err := client.GetLoginRequest(context.Background(), "challenge"); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("login error = %v, want ErrUpstream", err)
+	}
+	if _, err := client.GetConsentRequest(context.Background(), "challenge"); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("consent error = %v, want ErrUpstream", err)
+	}
+	if _, err := client.GetLogoutRequest(context.Background(), "challenge"); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("logout error = %v, want ErrUpstream", err)
+	}
+}
+
+func TestClient_LogoutAndReadinessFailuresMapToErrUpstream(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("unavailable"))
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	client, err := New(baseURL, server.Client(), "")
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+
+	if _, err := client.GetLogoutRequest(context.Background(), "challenge"); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("logout request error = %v, want ErrUpstream", err)
+	}
+	if _, err := client.RejectLogout(context.Background(), "challenge", ports.Rejection{}); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("reject logout error = %v, want ErrUpstream", err)
+	}
+	if err := client.Ready(context.Background()); !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("ready error = %v, want ErrUpstream", err)
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, value any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")

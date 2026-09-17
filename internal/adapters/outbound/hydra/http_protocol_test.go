@@ -210,6 +210,9 @@ func TestClient_DirectHelpersFailClosed(t *testing.T) {
 	if got := clientDomain(hydraapi.OAuth2Client{}); got.ID != "" || got.Name != "" {
 		t.Fatalf("empty client = %#v, want zero client", got)
 	}
+	if got := upstreamError(nil); got != nil {
+		t.Fatalf("upstreamError(nil) = %v, want nil", got)
+	}
 }
 
 func TestNewRejectsUnsafeURLs(t *testing.T) {

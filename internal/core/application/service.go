@@ -695,7 +695,11 @@ func validateLoginFreshness(transaction domain.Transaction, session domain.Sessi
 	if !promptIncludes(transaction.Prompt, "login") && transaction.MaxAge == nil {
 		return nil
 	}
-	if session.AuthenticatedAt.IsZero() || session.AuthenticatedAt.After(now) {
+	if session.AuthenticatedAt.IsZero() {
+		return domain.ErrInvalidAssurance
+	}
+	age := now.Sub(session.AuthenticatedAt)
+	if age < 0 {
 		return domain.ErrInvalidAssurance
 	}
 	if promptIncludes(transaction.Prompt, "login") && !session.AuthenticatedAt.After(transaction.StartedAt) {
@@ -712,10 +716,6 @@ func validateLoginFreshness(transaction domain.Transaction, session domain.Sessi
 			return domain.ErrInvalidAssurance
 		}
 		return nil
-	}
-	age := now.Sub(session.AuthenticatedAt)
-	if age < 0 {
-		return domain.ErrInvalidAssurance
 	}
 	ageSeconds := int64(age / time.Second)
 	if age%time.Second != 0 {

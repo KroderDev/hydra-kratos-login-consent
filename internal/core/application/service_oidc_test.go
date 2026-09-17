@@ -46,6 +46,56 @@ func TestService_StartLoginPreservesOIDCRequestContext(t *testing.T) {
 	}
 }
 
+func TestService_StartLoginResolvesRequestedAALWithoutACRValues(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, _, _, _ := newTestService(t)
+	hydra.login = domain.LoginRequest{
+		Challenge:    "login-challenge",
+		Client:       testClient(),
+		RequestedAAL: "aal2",
+	}
+
+	started, err := service.StartLogin(context.Background(), hydra.login.Challenge, ports.LoginStartInput{})
+	if err != nil {
+		t.Fatalf("StartLogin: %v", err)
+	}
+	parsed, err := url.Parse(started.URL)
+	if err != nil {
+		t.Fatalf("parse redirect: %v", err)
+	}
+	query := parsed.Query()
+	if query.Get("aal") != "aal2" {
+		t.Fatalf("handoff aal = %q, want aal2", query.Get("aal"))
+	}
+	transaction, err := service.state.Get(context.Background(), query.Get("transaction"))
+	if err != nil {
+		t.Fatalf("get transaction: %v", err)
+	}
+	if transaction.RequestedAAL != "aal2" || transaction.RequestedACR != "aal2" {
+		t.Fatalf("transaction = %#v, want aal2 derived from requested AAL", transaction)
+	}
+}
+
+func TestService_StartLoginRejectsUnresolvableACRValues(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, _, _, _ := newTestService(t)
+	hydra.login = domain.LoginRequest{
+		Challenge:          "login-challenge",
+		Client:             testClient(),
+		RequestedACRValues: []string{"urn:example:unsupported"},
+	}
+
+	result, err := service.StartLogin(context.Background(), hydra.login.Challenge, ports.LoginStartInput{})
+	if !errors.Is(err, domain.ErrInvalidAssurance) {
+		t.Fatalf("StartLogin error = %v, want invalid assurance", err)
+	}
+	if result.URL != "" || hydra.loginRejection.Error != "" {
+		t.Fatalf("result/rejection = %#v/%#v, want no state or rejection", result, hydra.loginRejection)
+	}
+}
+
 func TestService_StartLoginRejectsUnsupportedPromptAndSilentInteraction(t *testing.T) {
 	t.Parallel()
 
@@ -173,6 +223,11 @@ func TestValidateLoginFreshness(t *testing.T) {
 			session:     domain.Session{},
 		},
 		{
+			name:        "missing authentication timestamp",
+			transaction: domain.Transaction{Prompt: "login", StartedAt: start},
+			wantErr:     true,
+		},
+		{
 			name:        "prompt login after start",
 			transaction: domain.Transaction{Prompt: "login", StartedAt: start},
 			session:     domain.Session{AuthenticatedAt: now},
@@ -194,6 +249,11 @@ func TestValidateLoginFreshness(t *testing.T) {
 			transaction: domain.Transaction{MaxAge: int64Pointer(0), StartedAt: start},
 			session:     domain.Session{AuthenticatedAt: start},
 			wantErr:     true,
+		},
+		{
+			name:        "zero max age after reauthentication",
+			transaction: domain.Transaction{MaxAge: int64Pointer(0), StartedAt: start},
+			session:     domain.Session{AuthenticatedAt: now},
 		},
 		{
 			name:        "max age within limit",

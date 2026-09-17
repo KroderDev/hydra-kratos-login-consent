@@ -652,6 +652,62 @@ func TestService_ConsentRejectsUnrequestedScope(t *testing.T) {
 	}
 }
 
+func TestService_CompleteConsentRejectsUnrequestedAudience(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, _, _, _ := newTestService(t)
+	hydra.consent = domain.ConsentRequest{
+		Challenge:         "consent-challenge",
+		Client:            testClient(),
+		Subject:           "operator-1",
+		RequestedScopes:   []string{"openid"},
+		RequestedAudience: []string{"api"},
+	}
+
+	started, err := service.StartConsent(context.Background(), "consent-challenge", ports.ConsentStartInput{})
+	if err != nil {
+		t.Fatalf("start consent: %v", err)
+	}
+	result, err := service.CompleteConsent(context.Background(), ConsentInput{
+		Transaction:   transactionFromRedirect(t, started.URL),
+		CSRFToken:     queryValue(t, started.URL, "csrf"),
+		BrowserState:  started.BrowserState,
+		Decision:      "accept",
+		GrantScopes:   []string{"openid"},
+		GrantAudience: []string{"other-api"},
+	})
+	if err != nil {
+		t.Fatalf("complete consent: %v", err)
+	}
+	if result.URL != "https://hydra.example/oauth2/consent/rejected" {
+		t.Fatalf("redirect = %q, want rejection redirect", result.URL)
+	}
+	if hydra.consentRejection.Error != "access_denied" {
+		t.Fatalf("rejection error = %q, want access_denied", hydra.consentRejection.Error)
+	}
+}
+
+func TestService_AcceptConsentDecisionRejectsUnrequestedAudience(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, _, _, _ := newTestService(t)
+	result, err := service.acceptConsentDecision(context.Background(), domain.ConsentRequest{
+		Challenge:         "consent-challenge",
+		Subject:           "operator-1",
+		RequestedScopes:   []string{"openid"},
+		RequestedAudience: []string{"api"},
+	}, service.cfg.Clients["example-client"], domain.Session{Subject: "operator-1", AAL: "aal2"}, []string{"openid"}, []string{"other-api"}, false, 0)
+	if err != nil {
+		t.Fatalf("accept consent decision: %v", err)
+	}
+	if result.URL != "https://hydra.example/oauth2/consent/rejected" {
+		t.Fatalf("redirect = %q, want rejection redirect", result.URL)
+	}
+	if hydra.consentRejection.Error != "access_denied" {
+		t.Fatalf("rejection error = %q, want access_denied", hydra.consentRejection.Error)
+	}
+}
+
 func TestService_CompleteConsentRejectsPolicyFailure(t *testing.T) {
 	t.Parallel()
 

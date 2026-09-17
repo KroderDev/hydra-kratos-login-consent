@@ -223,13 +223,10 @@ func (c *Client) RejectLogout(ctx context.Context, challenge string, _ ports.Rej
 
 // Ready checks the Hydra admin health endpoint.
 func (c *Client) Ready(ctx context.Context) error {
-	response, httpResponse, err := c.api.MetadataAPI.IsReady(ctx).Execute()
+	_, httpResponse, err := c.api.MetadataAPI.IsReady(ctx).Execute()
 	defer closeResponse(httpResponse)
 	if err != nil {
 		return upstreamError(err)
-	}
-	if response == nil && (httpResponse == nil || httpResponse.StatusCode < http.StatusOK || httpResponse.StatusCode >= http.StatusMultipleChoices) {
-		return upstreamError(fmt.Errorf("empty readiness response"))
 	}
 	return nil
 }

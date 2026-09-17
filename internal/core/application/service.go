@@ -266,7 +266,7 @@ func (s *Service) StartConsent(ctx context.Context, challenge string, input port
 	if err != nil {
 		return RedirectResult{}, domain.ErrInvalidPrompt
 	}
-	if prompts.none {
+	if prompts.none && !request.Skip && !client.SkipConsent {
 		return s.rejectConsent(ctx, challenge, "consent_required", "The consent requires user interaction.")
 	}
 	transaction := domain.Transaction{

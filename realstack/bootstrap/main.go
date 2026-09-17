@@ -119,11 +119,13 @@ func (s *seeder) ensureIdentity(ctx context.Context, email, name, password strin
 	if err != nil {
 		return "", err
 	}
-	requestBody, err := json.Marshal(map[string]string{
-		"method":       "password",
-		"password":     password,
-		"traits.email": email,
-		"traits.name":  name,
+	requestBody, err := json.Marshal(map[string]any{
+		"method":   "password",
+		"password": password,
+		"traits": map[string]string{
+			"email": email,
+			"name":  name,
+		},
 	})
 	if err != nil {
 		return "", fmt.Errorf("encode registration request: %w", err)

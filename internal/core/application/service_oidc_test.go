@@ -296,6 +296,8 @@ func TestService_StartConsentValidatesPromptBeforeCreatingState(t *testing.T) {
 	tests := []struct {
 		name          string
 		prompt        string
+		skip          bool
+		skipConsent   bool
 		wantErr       error
 		wantRejection string
 	}{
@@ -303,17 +305,25 @@ func TestService_StartConsentValidatesPromptBeforeCreatingState(t *testing.T) {
 		{name: "consent prompt", prompt: "consent"},
 		{name: "combined login and consent prompt", prompt: "login consent"},
 		{name: "silent consent", prompt: "none", wantRejection: "consent_required"},
+		{name: "silent consent with hydra skip", prompt: "none", skip: true},
+		{name: "silent consent with client skip", prompt: "none", skipConsent: true},
 		{name: "invalid silent combination", prompt: "none login", wantErr: domain.ErrInvalidPrompt},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			service, hydra, _, _, _ := newTestService(t)
+			if tt.skipConsent {
+				client := service.cfg.Clients["example-client"]
+				client.SkipConsent = true
+				service.cfg.Clients["example-client"] = client
+			}
 			hydra.consent = domain.ConsentRequest{
 				Challenge:       "consent-challenge",
 				Client:          testClient(),
 				Subject:         "operator-1",
 				RequestedScopes: []string{"openid"},
+				Skip:            tt.skip,
 				Prompt:          tt.prompt,
 			}
 			result, err := service.StartConsent(context.Background(), hydra.consent.Challenge, ports.ConsentStartInput{})
@@ -333,6 +343,27 @@ func TestService_StartConsentValidatesPromptBeforeCreatingState(t *testing.T) {
 				t.Fatalf("result/rejection = %#v/%#v, want %q", result, hydra.consentRejection, tt.wantRejection)
 			}
 		})
+	}
+}
+
+func TestService_StartConsentMarksSkippedConsent(t *testing.T) {
+	t.Parallel()
+
+	service, hydra, _, _, _ := newTestService(t)
+	hydra.consent = domain.ConsentRequest{
+		Challenge:       "consent-challenge",
+		Client:          testClient(),
+		Subject:         "operator-1",
+		RequestedScopes: []string{"openid"},
+		Skip:            true,
+	}
+
+	result, err := service.StartConsent(context.Background(), hydra.consent.Challenge, ports.ConsentStartInput{})
+	if err != nil {
+		t.Fatalf("StartConsent: %v", err)
+	}
+	if got := queryValue(t, result.URL, "skip_consent"); got != "true" {
+		t.Fatalf("skip_consent = %q, want true", got)
 	}
 }
 

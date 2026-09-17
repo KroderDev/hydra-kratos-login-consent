@@ -130,6 +130,65 @@ func TestClient_GetConsentRequestMapsPrompt(t *testing.T) {
 	}
 }
 
+func TestClient_GetRequestsRejectMalformedOIDCRequestURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		path    string
+		request func(context.Context, *Client) error
+	}{
+		{
+			name: "login",
+			path: "/admin/oauth2/auth/requests/login",
+			request: func(ctx context.Context, client *Client) error {
+				_, err := client.GetLoginRequest(ctx, "login-challenge")
+				return err
+			},
+		},
+		{
+			name: "consent",
+			path: "/admin/oauth2/auth/requests/consent",
+			request: func(ctx context.Context, client *Client) error {
+				_, err := client.GetConsentRequest(ctx, "consent-challenge")
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tt.path {
+					http.NotFound(w, r)
+					return
+				}
+				writeJSON(t, w, map[string]any{
+					"challenge":   "challenge",
+					"client":      map[string]any{"client_id": "example-client"},
+					"request_url": "https://hydra.example/oauth2/auth?prompt=login&prompt=none",
+					"skip":        false,
+					"subject":     "operator-1",
+				})
+			}))
+			defer server.Close()
+			baseURL, err := url.Parse(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client, err := New(baseURL, server.Client(), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := tt.request(context.Background(), client); !errors.Is(err, domain.ErrUpstream) {
+				t.Fatalf("request error = %v, want ErrUpstream", err)
+			}
+		})
+	}
+}
+
 func TestClient_AcceptRequestsMapOptionalValues(t *testing.T) {
 	t.Parallel()
 

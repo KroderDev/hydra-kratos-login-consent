@@ -186,7 +186,9 @@ func TestRealstackOIDCCodePKCEClaimsRememberedConsentAndLogout(t *testing.T) {
 		t.Fatal("AAL2 authorization callback was incomplete")
 	}
 	aal2Code := aal2.callback.Values.Get("code")
-	aal2Token, err := oauthConfig.Exchange(ctx, aal2Code, oauth2.VerifierOption(aal2Verifier))
+	aal2Ctx, aal2Cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer aal2Cancel()
+	aal2Token, err := oauthConfig.Exchange(aal2Ctx, aal2Code, oauth2.VerifierOption(aal2Verifier))
 	if err != nil {
 		t.Fatalf("exchange AAL2 authorization code: %v", err)
 	}
@@ -194,7 +196,7 @@ func TestRealstackOIDCCodePKCEClaimsRememberedConsentAndLogout(t *testing.T) {
 	if !ok || aal2RawIDToken == "" {
 		t.Fatal("AAL2 token response did not contain an ID token")
 	}
-	aal2IDToken, err := provider.Verifier(&oidc.Config{ClientID: realstackClientID}).Verify(ctx, aal2RawIDToken)
+	aal2IDToken, err := provider.Verifier(&oidc.Config{ClientID: realstackClientID}).Verify(aal2Ctx, aal2RawIDToken)
 	if err != nil {
 		t.Fatalf("verify AAL2 ID token: %v", err)
 	}
@@ -822,8 +824,15 @@ func assertRealstackAuthorizationError(t *testing.T, name string, response *http
 	}
 	if response.StatusCode >= http.StatusMultipleChoices && response.StatusCode < http.StatusBadRequest {
 		location, err := response.Location()
-		if err == nil && (location.Path == "/oauth2/fallbacks/error" || location.Host == "127.0.0.1:5555") {
-			return
+		if err == nil {
+			if location.Path == "/oauth2/fallbacks/error" {
+				return
+			}
+			if location.Host == "127.0.0.1:5555" &&
+				location.Query().Get("error") != "" &&
+				location.Query().Get("code") == "" {
+				return
+			}
 		}
 	}
 	t.Fatalf("%s response status = %d, want a client error", name, response.StatusCode)

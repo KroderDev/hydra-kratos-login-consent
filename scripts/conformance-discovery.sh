@@ -10,6 +10,11 @@ die() {
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
+curl_connect_timeout=10
+curl_request_timeout=60
+curl_poll_timeout=45
+poll_deadline_seconds=480
+
 suite="${CONFORMANCE_SERVER:-}"
 token="${CONFORMANCE_TOKEN:-}"
 discovery_url="${CONFORMANCE_DISCOVERY_URL:-}"
@@ -74,6 +79,7 @@ cleanup() {
 	if [ -n "$plan_id" ]; then
 		encoded_plan_id="$(urlencode "$plan_id")"
 		curl --fail --silent --show-error --request DELETE \
+			--connect-timeout "$curl_connect_timeout" --max-time "$curl_request_timeout" \
 			--header "Authorization: Bearer $token" \
 			"$suite/api/plan/$encoded_plan_id" >/dev/null 2>&1 || true
 	fi
@@ -87,6 +93,7 @@ jq -n --arg discovery_url "$discovery_url" \
 	>"$workdir/config.json"
 
 curl --fail --silent --show-error --request POST \
+	--connect-timeout "$curl_connect_timeout" --max-time "$curl_request_timeout" \
 	--header "Authorization: Bearer $token" \
 	--header 'Content-Type: application/json' \
 	--data-binary "@$workdir/config.json" \
@@ -97,6 +104,7 @@ plan_id="$(jq -er '.id // empty' "$workdir/plan.json" 2>/dev/null)" || die "OIDC
 encoded_plan_id="$(urlencode "$plan_id")"
 
 curl --fail --silent --show-error --request POST \
+	--connect-timeout "$curl_connect_timeout" --max-time "$curl_request_timeout" \
 	--header "Authorization: Bearer $token" \
 	"$suite/api/runner?test=$(urlencode "oidcc-discovery-endpoint-verification")&plan=$encoded_plan_id" \
 	--output "$workdir/module.json" || die "unable to start OIDC discovery verification"
@@ -104,8 +112,14 @@ curl --fail --silent --show-error --request POST \
 module_id="$(jq -er '.id // empty' "$workdir/module.json" 2>/dev/null)" || die "OIDC discovery module did not return an ID"
 encoded_module_id="$(urlencode "$module_id")"
 
+poll_deadline=$((SECONDS + poll_deadline_seconds))
 while :; do
+	if [ "$SECONDS" -ge "$poll_deadline" ]; then
+		die "OIDC discovery verification did not finish within the polling deadline"
+	fi
+
 	curl --fail --silent --show-error \
+		--connect-timeout "$curl_connect_timeout" --max-time "$curl_poll_timeout" \
 		--header "Authorization: Bearer $token" \
 		"$suite/api/runner/$encoded_module_id/wait-state?states=FINISHED%2CINTERRUPTED&timeoutMs=30000" \
 		--output "$workdir/wait.json" || die "unable to poll OIDC discovery verification"
@@ -126,6 +140,7 @@ while :; do
 done
 
 curl --fail --silent --show-error \
+	--connect-timeout "$curl_connect_timeout" --max-time "$curl_request_timeout" \
 	--header "Authorization: Bearer $token" \
 	"$suite/api/info/$encoded_module_id" \
 	--output "$workdir/info.json" || die "unable to read OIDC discovery verification result"

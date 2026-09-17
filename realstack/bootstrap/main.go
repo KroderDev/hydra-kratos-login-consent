@@ -104,6 +104,8 @@ func loadConfig() (config, error) {
 	}, nil
 }
 
+// ensureIdentity returns the existing Kratos identity for email or registers it
+// with the supplied traits and password when it is absent.
 func (s *seeder) ensureIdentity(ctx context.Context, email, name, password string) (string, error) {
 	identities, err := s.listIdentities(ctx)
 	if err != nil {

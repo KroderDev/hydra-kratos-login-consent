@@ -93,6 +93,8 @@ func NewService(cfg config.Config, dependencies Dependencies) (*Service, error) 
 }
 
 // StartLogin validates a Hydra login challenge and starts or completes login.
+// OIDC prompt, max_age, and ACR requirements determine whether Hydra's existing
+// session can be accepted or a browser-bound transaction is required.
 func (s *Service) StartLogin(ctx context.Context, challenge string, input ports.LoginStartInput) (RedirectResult, error) {
 	if err := validateChallenge(challenge, s.cfg.EffectiveMaxChallengeLength()); err != nil {
 		return RedirectResult{}, err
@@ -190,7 +192,8 @@ func (s *Service) StartLogin(ctx context.Context, challenge string, input ports.
 	return RedirectResult{URL: redirect, BrowserState: transaction.BrowserState}, err
 }
 
-// CompleteLogin consumes a login transaction and validates the Kratos session.
+// CompleteLogin consumes a login transaction and accepts it only when the
+// Kratos session satisfies the bound subject, freshness, assurance, and policy.
 func (s *Service) CompleteLogin(ctx context.Context, handle string, input ports.LoginInput) (RedirectResult, error) {
 	transaction, err := s.load(ctx, handle, domain.FlowLogin, input.CSRFToken, input.BrowserState)
 	if err != nil {
@@ -237,7 +240,8 @@ func (s *Service) CompleteLogin(ctx context.Context, handle string, input ports.
 	return s.hydraRedirect(redirect, err)
 }
 
-// StartConsent validates a Hydra consent challenge and starts or completes consent.
+// StartConsent validates a Hydra consent challenge and starts or completes
+// consent according to the OIDC prompt and configured skip-consent policy.
 func (s *Service) StartConsent(ctx context.Context, challenge string, input ports.ConsentStartInput) (RedirectResult, error) {
 	if err := validateChallenge(challenge, s.cfg.EffectiveMaxChallengeLength()); err != nil {
 		return RedirectResult{}, err
@@ -298,7 +302,9 @@ func (s *Service) StartConsent(ctx context.Context, challenge string, input port
 	return RedirectResult{URL: redirect, BrowserState: transaction.BrowserState}, err
 }
 
-// CompleteConsent consumes a consent transaction and submits a policy-checked result.
+// CompleteConsent consumes a consent transaction and submits a policy-checked
+// result. For acceptance, an omitted audience grant selects every audience in
+// the transaction.
 func (s *Service) CompleteConsent(ctx context.Context, input ConsentInput) (RedirectResult, error) {
 	transaction, err := s.load(ctx, input.Transaction, domain.FlowConsent, input.CSRFToken, input.BrowserState)
 	if err != nil {
@@ -655,6 +661,8 @@ func cloneInt64(value *int64) *int64 {
 	return &cloned
 }
 
+// parsePrompt validates supported OIDC prompt values. Duplicate values,
+// unsupported values, and combinations containing none return ErrInvalidPrompt.
 func parsePrompt(value string) (promptSet, error) {
 	var prompts promptSet
 	seen := make(map[string]struct{})
@@ -691,6 +699,9 @@ func promptIncludes(prompt, value string) bool {
 	return false
 }
 
+// validateLoginFreshness enforces prompt=login and max_age against the session's
+// authentication time. Missing, future, or insufficiently fresh timestamps
+// return ErrInvalidAssurance.
 func validateLoginFreshness(transaction domain.Transaction, session domain.Session, now time.Time) error {
 	if !promptIncludes(transaction.Prompt, "login") && transaction.MaxAge == nil {
 		return nil

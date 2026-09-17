@@ -222,6 +222,8 @@ func (s *policyServer) authorized(value string) bool {
 	return subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(value, bearerPrefix)), s.token) == 1
 }
 
+// evaluate authorizes only the configured operator with the required assurance.
+// Consent grants must be unique subsets of the corresponding requested values.
 func (s *policyServer) evaluate(input policyRequest) decision {
 	if input.Version != contractVersion || input.ClientID != s.clientID || input.Subject == "" || (input.Operation != "login" && input.Operation != "consent") {
 		return decision{}

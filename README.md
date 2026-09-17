@@ -20,6 +20,8 @@ The service:
 - Validate the resulting Kratos session.
 - Enforce a configurable authenticator assurance level.
 - Apply an application-supplied authorization policy.
+- Honor OIDC `prompt` and `max_age` semantics for login freshness and
+  fail-closed silent flows.
 - Accept or reject Hydra challenges through the private Hydra admin API.
 - Add only approved, application-specific or explicitly mapped OIDC identity claims.
 
@@ -89,6 +91,7 @@ The server reads configuration from environment variables:
 | `MAX_CHALLENGE_LENGTH` | Maximum login, consent, and logout challenge length in bytes, default `2048`; `0` uses the default. |
 | `ALLOWED_CLIENTS` | JSON client, redirect, scope, audience, and claim allowlists. |
 | `OIDC_IDENTITY_CLAIM_MAPPINGS` | Optional JSON mappings from sanitized Kratos traits/metadata to OIDC claims. |
+| `OIDC_ACR_MAPPINGS` | Optional JSON map of exact OIDC `acr_values` to `aal1`, `aal2`, or `aal3`; empty accepts only the built-in AAL values. |
 | `ALLOWED_SUBJECTS` | Comma-separated subjects for the static policy adapter. |
 | `ALLOWED_SUBJECT_SCOPES` | JSON subject/client/scope rules for static policy; required in secure environments only when `POLICY_BACKEND=static`. |
 | `POLICY_BACKEND` | Policy backend, `static` by default or `http`. |
@@ -121,6 +124,10 @@ All configured redirect URIs, post-logout redirect URIs, scopes, audiences, and
 claims are exact allowlists; wildcards and inferred clients are not supported.
 Identity claim mappings are opt-in, use exact RFC 6901 JSON Pointers, and are
 described in the [configuration reference](docs/configuration.md#identity-claim-mappings).
+ACR mappings are also opt-in: `OIDC_ACR_MAPPINGS` maps exact OIDC `acr_values`
+strings to `aal1`, `aal2`, or `aal3`, while those built-in AAL values need no
+mapping. The requested ACR value is returned to Hydra on acceptance. See
+[OIDC ACR mappings](docs/configuration.md#oidc-acr-mappings).
 With `POLICY_BACKEND=static`, `ALLOWED_SUBJECT_SCOPES` is required outside
 development and test. With `POLICY_BACKEND=http`, `POLICY_URL` and its
 server-side bearer credential are required in secure environments instead;

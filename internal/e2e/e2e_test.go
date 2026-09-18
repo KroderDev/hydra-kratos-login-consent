@@ -489,6 +489,7 @@ func (f *hydraFixture) consentAcceptanceSnapshot() ports.ConsentAcceptance {
 	acceptance.GrantAudience = append([]string(nil), acceptance.GrantAudience...)
 	acceptance.Session.IDToken = cloneMap(acceptance.Session.IDToken)
 	acceptance.Session.AccessToken = cloneMap(acceptance.Session.AccessToken)
+	acceptance.Session.UserInfo = cloneMap(acceptance.Session.UserInfo)
 	return acceptance
 }
 
@@ -558,6 +559,7 @@ func (f *hydraFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			Session     struct {
 				IDToken     map[string]any `json:"id_token"`
 				AccessToken map[string]any `json:"access_token"`
+				UserInfo    map[string]any `json:"userinfo"`
 			} `json:"session"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -569,7 +571,11 @@ func (f *hydraFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			GrantScopes: body.GrantScope,
 			Remember:    body.Remember,
 			RememberFor: body.RememberFor,
-			Session:     domain.Claims{IDToken: body.Session.IDToken, AccessToken: body.Session.AccessToken},
+			Session: domain.Claims{
+				IDToken:     body.Session.IDToken,
+				AccessToken: body.Session.AccessToken,
+				UserInfo:    body.Session.UserInfo,
+			},
 		}
 		f.mu.Unlock()
 		writeJSONNoTest(w, map[string]string{"redirect_to": f.redirect("oauth2/consent/callback")})

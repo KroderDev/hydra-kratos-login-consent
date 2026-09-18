@@ -21,6 +21,7 @@ type Client struct {
 	SkipConsent                bool                `json:"skip_consent"`
 	AllowedIDTokenClaims       map[string][]string `json:"allowed_id_token_claims"`
 	AllowedAccessTokenClaims   map[string][]string `json:"allowed_access_token_claims"`
+	AllowedUserInfoClaims      map[string][]string `json:"allowed_userinfo_claims"`
 }
 
 // PolicyBackend identifies the authorization policy implementation.
@@ -146,6 +147,9 @@ func (c Config) Validate() error {
 			return err
 		}
 		if err := validateClaimAllowlist(id, client.AllowedAccessTokenClaims, client.AllowedScopes); err != nil {
+			return err
+		}
+		if err := validateClaimAllowlist(id, client.AllowedUserInfoClaims, client.AllowedScopes); err != nil {
 			return err
 		}
 	}

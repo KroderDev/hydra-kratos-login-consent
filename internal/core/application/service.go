@@ -568,9 +568,15 @@ func (s *Service) filterClaims(client config.Client, claims domain.Claims, sessi
 			scopes,
 			s.cfg.OIDCIdentityClaimMappings,
 		),
+		UserInfo: filterClaimMap(
+			claims.UserInfo,
+			client.AllowedUserInfoClaims,
+			scopes,
+			s.cfg.OIDCIdentityClaimMappings,
+		),
 	}
 	if len(s.cfg.OIDCIdentityClaimMappings) > 0 &&
-		(len(client.AllowedIDTokenClaims) > 0 || len(client.AllowedAccessTokenClaims) > 0) {
+		(len(client.AllowedIDTokenClaims) > 0 || len(client.AllowedAccessTokenClaims) > 0 || len(client.AllowedUserInfoClaims) > 0) {
 		identityClaims := s.cfg.OIDCIdentityClaimMappings.Derive(session, s.cfg.IsSecureEnvironment())
 		if len(identityClaims) > 0 {
 			result.IDToken = mergeClaims(result.IDToken, filterIdentityClaimMap(
@@ -581,6 +587,11 @@ func (s *Service) filterClaims(client config.Client, claims domain.Claims, sessi
 			result.AccessToken = mergeClaims(result.AccessToken, filterIdentityClaimMap(
 				identityClaims,
 				client.AllowedAccessTokenClaims,
+				scopes,
+			))
+			result.UserInfo = mergeClaims(result.UserInfo, filterIdentityClaimMap(
+				identityClaims,
+				client.AllowedUserInfoClaims,
 				scopes,
 			))
 		}

@@ -3,6 +3,7 @@ package hydra
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -19,6 +20,8 @@ import (
 type Client struct {
 	api *hydraapi.APIClient
 }
+
+var errUnsupportedUserInfoClaims = errors.New("separate UserInfo claims are not supported by the Hydra consent API")
 
 var _ ports.LoginProvider = (*Client)(nil)
 var _ ports.ConsentProvider = (*Client)(nil)
@@ -141,6 +144,11 @@ func (c *Client) GetConsentRequest(ctx context.Context, challenge string) (domai
 
 // AcceptConsent accepts a validated Hydra consent challenge.
 func (c *Client) AcceptConsent(ctx context.Context, challenge string, acceptance ports.ConsentAcceptance) (string, error) {
+	// Hydra v26.2.0 ignores unknown session fields and derives /userinfo from
+	// session.id_token, so refusing this result prevents silent claim loss.
+	if len(acceptance.Session.UserInfo) > 0 {
+		return "", fmt.Errorf("%w: %w", domain.ErrUpstream, errUnsupportedUserInfoClaims)
+	}
 	session := hydraapi.NewAcceptOAuth2ConsentRequestSession()
 	session.SetAccessToken(acceptance.Session.AccessToken)
 	session.SetIdToken(acceptance.Session.IDToken)

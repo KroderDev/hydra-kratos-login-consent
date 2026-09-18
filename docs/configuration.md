@@ -36,6 +36,7 @@ explicitly allowlisted native-app loopback IP literals described below.
 | `MAX_CHALLENGE_LENGTH` | `2048` | Maximum login, consent, and logout challenge length in bytes. `0` uses the default (`2048`); negative values or values exceeding `4096` are invalid. The maximum configurable limit is `4096` bytes to ensure the request line fits within the HTTP server's 16 KB (`16384` bytes) header limit. |
 | `ALLOWED_CLIENTS` | empty object | JSON map of exact OAuth client and token policy allowlists. An empty map causes all client requests to be rejected. See [Client Allowlists](#client-allowlists). |
 | `OIDC_IDENTITY_CLAIM_MAPPINGS` | empty | Optional JSON map of exact, server-side mappings from sanitized Kratos traits and public metadata to OIDC claims. Empty or unset derives no identity claims. See [Identity Claim Mappings](#identity-claim-mappings). |
+| `OIDC_ACR_MAPPINGS` | empty | Optional JSON map of exact OIDC `acr_values` strings to internal Kratos assurance levels. Empty or unset recognizes only the built-in `aal1`, `aal2`, and `aal3` values. See [OIDC ACR Mappings](#oidc-acr-mappings). |
 | `ALLOWED_SUBJECTS` | empty | Comma-separated exact subject IDs used by the static policy backend. An empty value makes the static policy deny every subject. |
 | `ALLOWED_SUBJECT_SCOPES` | empty | JSON subject-to-client-to-scope rules for the static policy backend. Required in secure environments when `POLICY_BACKEND=static`; not used by the HTTP policy backend. |
 | `POLICY_BACKEND` | `static` | `static` for the local allowlist adapter or `http` for the versioned remote policy adapter. |
@@ -88,6 +89,9 @@ The following is a generic shape. Values are examples, not credentials:
     "skip_consent": false,
     "allowed_id_token_claims": {
       "email": ["email"]
+    },
+    "allowed_userinfo_claims": {
+      "name": ["profile"]
     },
     "allowed_access_token_claims": {}
   }
@@ -160,9 +164,11 @@ transforms, invalid pointers, and ambiguous source lists reject startup.
 The standard OIDC scopes are always applied to derived identity claims:
 `email` and `email_verified` require the `email` scope; `name`, `given_name`,
 `family_name`, `picture`, and other profile claims require `profile`. A claim
-must also be present in the client's relevant `allowed_id_token_claims` or
-`allowed_access_token_claims` map. Identity claims are never copied to access
-tokens automatically.
+must also be present in the client's relevant destination allowlist:
+`allowed_id_token_claims`, `allowed_userinfo_claims`, or
+`allowed_access_token_claims`. The three destinations are filtered
+independently. Identity claims are never copied to another destination
+automatically.
 
 Configured identity mapping names are authoritative over same-name policy
 claims. The policy value is suppressed and the validated identity value is
@@ -171,6 +177,64 @@ overriding a standard identity claim while preserving existing custom policy
 claims. OAuth/OIDC protocol claims such as `sub`, `iss`, `aud`, `exp`, `iat`,
 `nbf`, `nonce`, `acr`, `amr`, and `azp` cannot be mapped or supplied through
 client policy claim allowlists; Hydra remains the owner of those claims.
+
+Policy-provided claims use the same three destination-specific allowlists. The
+optional `claims.id_token`, `claims.userinfo`, and `claims.access_token` objects
+are filtered independently; an absent or empty `allowed_userinfo_claims` map
+produces no UserInfo claims, and claims are never copied between destinations.
+
+### Hydra UserInfo limitation
+
+The service currently uses Hydra v26.2.0. Its consent acceptance contract has
+session fields for `id_token` and `access_token`, but not a separate `userinfo`
+object. Its `/userinfo` endpoint derives the response from the ID-token session
+claims. Therefore a non-empty UserInfo result cannot be represented faithfully
+by this Hydra version. The adapter fails closed before sending the consent
+acceptance and returns an upstream failure; it does not send an unknown JSON
+field or move UserInfo claims into the ID token. Keep `allowed_userinfo_claims`
+empty and omit `claims.userinfo` until Hydra supports a distinct persisted
+UserInfo session object.
+
+## OIDC ACR Mappings
+
+`OIDC_ACR_MAPPINGS` is an optional JSON object that maps exact OIDC
+`acr_values` strings to the internal Kratos assurance level the provider
+enforces. Map keys are the ACR values that clients request; map values are
+`aal1`, `aal2`, or `aal3`, matched case-insensitively and resolved lowercase:
+
+```json
+{
+  "urn:mace:incommon:iap:silver": "aal2",
+  "urn:example:high-assurance": "aal3"
+}
+```
+
+When Hydra reports requested `acr_values` for a login challenge, the provider
+resolves the first list entry that is either a configured mapping key (exact
+match) or a built-in `aal1`, `aal2`, or `aal3` value (case-insensitive). The
+built-in values work without configuration; entries before the first supported
+value are ignored. A non-empty list in which no entry resolves, or that
+contains a blank entry, fails closed with `invalid_request` and does not reject
+the Hydra challenge. When no `acr_values` are requested, no request-specific
+assurance is imposed and `REQUIRED_AAL` alone applies.
+
+The enforced level is the stronger of `REQUIRED_AAL` and the resolved requested
+level, so a mapping cannot weaken the configured minimum. On login acceptance
+the provider returns the original requested ACR string (for example, the custom
+URN) to Hydra as the negotiated `acr`, so the issued ID token carries the value
+the relying party asked for. When no ACR was requested, the Kratos session AAL
+is returned instead. Hydra remains the owner of the `acr` claim: ACR mappings
+only resolve the enforced level and the negotiated `acr` value, and they cannot
+be used through client claim allowlists to supply protocol claims.
+
+Validation is strict and happens at startup. Malformed JSON, blank or CR/LF-
+bearing ACR keys, and map values other than `aal1`, `aal2`, or `aal3` reject the
+configuration. Mapping keys are deployment configuration, never browser input,
+and must not contain secrets.
+
+A resolved requested level also counts as requiring interaction for a
+`prompt=none` login request, even when Hydra reports that the login can be
+skipped. See [http-contract.md](http-contract.md#oidc-prompt-and-freshness).
 
 ## Policy Backends
 

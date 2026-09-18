@@ -457,6 +457,35 @@ func TestConfigValidateClaimAllowlist(t *testing.T) {
 	}
 }
 
+func TestConfigValidateUserInfoClaimAllowlist(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		claims  map[string][]string
+		wantErr bool
+	}{
+		{name: "unallowlisted scope", claims: map[string][]string{"phone_number": {"phone"}}, wantErr: true},
+		{name: "blank claim name", claims: map[string][]string{"": nil}, wantErr: true},
+		{name: "reserved protocol claim", claims: map[string][]string{"sub": nil}, wantErr: true},
+		{name: "duplicate required scopes", claims: map[string][]string{"phone_number": {"openid", "openid"}}, wantErr: true},
+		{name: "allowed scope", claims: map[string][]string{"phone_number": {"openid"}}, wantErr: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig(t)
+			client := cfg.Clients["example-client"]
+			client.AllowedScopes = []string{"openid"}
+			client.AllowedUserInfoClaims = tt.claims
+			cfg.Clients["example-client"] = client
+			if err := cfg.Validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestConfigValidateRejectsOIDCIdentityMappingErrors(t *testing.T) {
 	t.Parallel()
 

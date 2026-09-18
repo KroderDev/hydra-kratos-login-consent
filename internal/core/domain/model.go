@@ -68,10 +68,11 @@ type Session struct {
 	IdentityMetadataPublic map[string]any
 }
 
-// Claims contains claims that may be passed to Hydra token sessions.
+// Claims contains destination-specific claims for Hydra consent processing.
 type Claims struct {
 	IDToken     map[string]any
 	AccessToken map[string]any
+	UserInfo    map[string]any
 }
 
 // Transaction is short-lived state bound to one Hydra browser challenge.

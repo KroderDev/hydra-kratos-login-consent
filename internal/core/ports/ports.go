@@ -151,7 +151,7 @@ type PolicyInput struct {
 	AMR                []string
 }
 
-// ConsentDecision is the policy result, effective grants, and candidate token claims.
+// ConsentDecision is the policy result, effective grants, and candidate session claims.
 type ConsentDecision struct {
 	Allowed          bool
 	GrantedScopes    []string

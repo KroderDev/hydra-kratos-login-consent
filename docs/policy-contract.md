@@ -61,6 +61,7 @@ An allowed consent response contains explicit effective grants:
     "id_token": {
       "email": "operator@example.com"
     },
+    "userinfo": {},
     "access_token": {}
   }
 }
@@ -68,10 +69,12 @@ An allowed consent response contains explicit effective grants:
 
 Denied responses must contain `allowed: false` and empty grants. Claims are
 optional for allowed responses and are always filtered through the configured
-client claim allowlists before reaching Hydra. The provider derives optional
-identity claims locally from the validated Kratos session after this policy
-decision is allowed; identity source data and mappings are never sent to the
-policy service.
+client claim allowlists before reaching Hydra. `claims.id_token`,
+`claims.userinfo`, and `claims.access_token` are independent optional objects;
+the provider never copies a claim from one destination to another. The
+provider derives optional identity claims locally from the validated Kratos
+session after this policy decision is allowed; identity source data and
+mappings are never sent to the policy service.
 
 The provider rejects a response when:
 
@@ -116,11 +119,20 @@ in this response. They can read only sanitized Kratos `traits` and
 `metadata_public` values through exact RFC 6901 JSON Pointers. `email` and
 `email_verified` require the `email` scope, while profile claims such as
 `name`, `given_name`, `family_name`, and `picture` require `profile`. The
-corresponding client token allowlist is still required, and access-token
-identity claims remain opt-in.
+corresponding destination allowlist (`allowed_id_token_claims`,
+`allowed_userinfo_claims`, or `allowed_access_token_claims`) is still required,
+and identity claims remain opt-in for every destination.
 
 Configured identity mapping names are authoritative: same-name policy claims
 are suppressed so a policy response cannot replace a validated identity value.
 Protocol-owned claims such as `sub`, `iss`, `aud`, `exp`, `iat`, `nbf`, `nonce`,
 `acr`, `amr`, and `azp` are rejected from both mapping and client policy
 allowlist configuration. Hydra remains responsible for protocol claims.
+
+The pinned Hydra v26.2.0 consent API has no separate `userinfo` session field,
+and its `/userinfo` response is derived from `session.id_token`. If filtering
+produces a non-empty UserInfo object, the Hydra adapter fails closed with an
+upstream error before sending the acceptance request rather than silently
+dropping or relocating those claims. Do not return `claims.userinfo` or configure
+`allowed_userinfo_claims` until the deployed Hydra version supports a distinct
+persisted UserInfo session object.

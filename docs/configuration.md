@@ -90,6 +90,9 @@ The following is a generic shape. Values are examples, not credentials:
     "allowed_id_token_claims": {
       "email": ["email"]
     },
+    "allowed_userinfo_claims": {
+      "name": ["profile"]
+    },
     "allowed_access_token_claims": {}
   }
 }
@@ -161,9 +164,11 @@ transforms, invalid pointers, and ambiguous source lists reject startup.
 The standard OIDC scopes are always applied to derived identity claims:
 `email` and `email_verified` require the `email` scope; `name`, `given_name`,
 `family_name`, `picture`, and other profile claims require `profile`. A claim
-must also be present in the client's relevant `allowed_id_token_claims` or
-`allowed_access_token_claims` map. Identity claims are never copied to access
-tokens automatically.
+must also be present in the client's relevant destination allowlist:
+`allowed_id_token_claims`, `allowed_userinfo_claims`, or
+`allowed_access_token_claims`. The three destinations are filtered
+independently. Identity claims are never copied to another destination
+automatically.
 
 Configured identity mapping names are authoritative over same-name policy
 claims. The policy value is suppressed and the validated identity value is
@@ -172,6 +177,23 @@ overriding a standard identity claim while preserving existing custom policy
 claims. OAuth/OIDC protocol claims such as `sub`, `iss`, `aud`, `exp`, `iat`,
 `nbf`, `nonce`, `acr`, `amr`, and `azp` cannot be mapped or supplied through
 client policy claim allowlists; Hydra remains the owner of those claims.
+
+Policy-provided claims use the same three destination-specific allowlists. The
+optional `claims.id_token`, `claims.userinfo`, and `claims.access_token` objects
+are filtered independently; an absent or empty `allowed_userinfo_claims` map
+produces no UserInfo claims, and claims are never copied between destinations.
+
+### Hydra UserInfo limitation
+
+The service currently uses Hydra v26.2.0. Its consent acceptance contract has
+session fields for `id_token` and `access_token`, but not a separate `userinfo`
+object. Its `/userinfo` endpoint derives the response from the ID-token session
+claims. Therefore a non-empty UserInfo result cannot be represented faithfully
+by this Hydra version. The adapter fails closed before sending the consent
+acceptance and returns an upstream failure; it does not send an unknown JSON
+field or move UserInfo claims into the ID token. Keep `allowed_userinfo_claims`
+empty and omit `claims.userinfo` until Hydra supports a distinct persisted
+UserInfo session object.
 
 ## OIDC ACR Mappings
 

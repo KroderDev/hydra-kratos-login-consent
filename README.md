@@ -115,7 +115,10 @@ replicas and production deployments.
     "allowed_redirect_uris": ["https://client.example/callback"],
     "allowed_post_logout_redirect_uris": ["https://client.example/"],
     "allowed_scopes": ["openid", "profile"],
-    "allowed_audiences": ["example-api"]
+    "allowed_audiences": ["example-api"],
+    "allowed_id_token_claims": {"email": ["email"]},
+    "allowed_userinfo_claims": {},
+    "allowed_access_token_claims": {}
   }
 }
 ```
@@ -124,6 +127,10 @@ All configured redirect URIs, post-logout redirect URIs, scopes, audiences, and
 claims are exact allowlists; wildcards and inferred clients are not supported.
 Identity claim mappings are opt-in, use exact RFC 6901 JSON Pointers, and are
 described in the [configuration reference](docs/configuration.md#identity-claim-mappings).
+Claims are filtered independently for the ID token, UserInfo, and access token;
+the pinned Hydra v26.2.0 consent API does not support a separate UserInfo
+session object, so keep `allowed_userinfo_claims` empty until that upstream
+contract is available.
 ACR mappings are also opt-in: `OIDC_ACR_MAPPINGS` maps exact OIDC `acr_values`
 strings to `aal1`, `aal2`, or `aal3`, while those built-in AAL values need no
 mapping. The requested ACR value is returned to Hydra on acceptance. See

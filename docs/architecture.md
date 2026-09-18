@@ -130,6 +130,9 @@ the full identity response, admin metadata, credentials, or browser
 credentials, and neither identity object is added to `domain.Transaction` or
 Redis. After consent policy approval, the core applies the configured exact RFC
 6901 mappings and standard OIDC scope/type checks. The resulting claims are
-then filtered independently for ID tokens and access tokens using the client's
-existing allowlists. No identity claim is copied to an access token without an
-explicit access-token allowlist entry.
+then filtered independently for ID tokens, UserInfo, and access tokens using the
+client's corresponding allowlists. No identity claim is copied to another
+destination without an explicit allowlist entry. The current Hydra v26.2.0
+consent API cannot persist a separate UserInfo session object, so the Hydra
+adapter rejects non-empty UserInfo claims instead of silently losing or
+relocating them.

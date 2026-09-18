@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"sync/atomic"
 	"testing"
 
 	hydraapi "github.com/ory/hydra-client-go/v26"
@@ -248,59 +249,44 @@ func TestClient_AcceptRequestsMapOptionalValues(t *testing.T) {
 	}
 }
 
-func TestClient_AcceptConsentSerializesUserInfoSessionClaims(t *testing.T) {
+func TestClient_AcceptConsentRejectsUnsupportedUserInfoSessionClaims(t *testing.T) {
 	t.Parallel()
 
-	t.Run("userinfo claims stay isolated from token destinations", func(t *testing.T) {
-		t.Parallel()
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := New(baseURL, server.Client(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var body map[string]any
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode request body: %v", err)
-			}
-			session, ok := body["session"].(map[string]any)
-			if !ok {
-				t.Fatalf("consent session = %#v", body["session"])
-			}
-			userInfo, ok := session["userinfo"].(map[string]any)
-			if !ok || userInfo["phone_number"] != "+15550100" {
-				t.Errorf("userinfo session = %#v", session["userinfo"])
-			}
-			idToken, idTokenOK := session["id_token"].(map[string]any)
-			accessToken, accessTokenOK := session["access_token"].(map[string]any)
-			if !idTokenOK || !accessTokenOK {
-				t.Fatalf("consent session = %#v", session)
-			}
-			if _, exists := idToken["phone_number"]; exists {
-				t.Errorf("userinfo claim leaked into id_token: %#v", idToken)
-			}
-			if _, exists := accessToken["phone_number"]; exists {
-				t.Errorf("userinfo claim leaked into access_token: %#v", accessToken)
-			}
-			if _, exists := userInfo["email"]; exists {
-				t.Errorf("id_token claim copied into userinfo: %#v", userInfo)
-			}
-			writeJSON(t, w, map[string]string{"redirect_to": "https://hydra.example/next"})
-		}))
-		defer server.Close()
-		baseURL, _ := url.Parse(server.URL)
-		client, err := New(baseURL, server.Client(), "")
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if _, err := client.AcceptConsent(context.Background(), "consent", ports.ConsentAcceptance{
-			GrantScopes: []string{"openid"},
-			Session: domain.Claims{
-				IDToken:     map[string]any{"email": "operator@example.com"},
-				AccessToken: map[string]any{"tenant": "tenant-1"},
-				UserInfo:    map[string]any{"phone_number": "+15550100"},
-			},
-		}); err != nil {
-			t.Fatalf("AcceptConsent: %v", err)
-		}
+	_, err = client.AcceptConsent(context.Background(), "consent", ports.ConsentAcceptance{
+		GrantScopes: []string{"openid"},
+		Session: domain.Claims{
+			IDToken:  map[string]any{"email": "operator@example.com"},
+			UserInfo: map[string]any{"phone_number": "+15550100"},
+		},
 	})
+	if !errors.Is(err, domain.ErrUpstream) {
+		t.Fatalf("AcceptConsent error = %v, want ErrUpstream", err)
+	}
+	if !errors.Is(err, errUnsupportedUserInfoClaims) {
+		t.Fatalf("AcceptConsent error = %v, want unsupported UserInfo error", err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("Hydra requests = %d, want 0", got)
+	}
+}
+
+func TestClient_AcceptConsentOmitsEmptyUserInfoSessionClaims(t *testing.T) {
+	t.Parallel()
 
 	t.Run("absent userinfo is omitted", func(t *testing.T) {
 		t.Parallel()

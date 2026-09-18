@@ -61,6 +61,24 @@ redirect.
 
 The UI-provided subject, policy result, and claim values are never trusted.
 
+## Consent Claims And Hydra Session
+
+The consent policy may return claims in three independent objects:
+`claims.id_token`, `claims.userinfo`, and `claims.access_token`. The provider
+filters each object against the corresponding client allowlist and the
+effective granted scopes. Derived Kratos identity claims use the same rules;
+they are never copied to another destination, and Hydra remains responsible
+for protocol claims.
+
+The deployed Hydra v26.2.0 consent API accepts only `session.id_token` and
+`session.access_token`. Its `/userinfo` endpoint is derived from the ID-token
+session claims and does not read a separate `session.userinfo` object. If the
+filtered UserInfo object is non-empty, the provider fails closed before making
+the Hydra acceptance request and returns a temporary upstream failure. It does
+not serialize an unsupported field or move those claims into the ID token.
+Until Hydra supports a distinct persisted UserInfo session object, leave the
+UserInfo allowlist empty and omit `claims.userinfo` from policy responses.
+
 ## OIDC Prompt And Freshness
 
 The provider reads `prompt` and `max_age` from the original authorization URL

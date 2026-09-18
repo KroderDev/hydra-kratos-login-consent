@@ -144,6 +144,12 @@ func (c *Client) AcceptConsent(ctx context.Context, challenge string, acceptance
 	session := hydraapi.NewAcceptOAuth2ConsentRequestSession()
 	session.SetAccessToken(acceptance.Session.AccessToken)
 	session.SetIdToken(acceptance.Session.IDToken)
+	if len(acceptance.Session.UserInfo) > 0 {
+		// The generated v26 SDK has no typed UserInfo session field, so the
+		// dedicated userinfo claims travel through the additional-properties
+		// escape hatch and are omitted entirely when no claims are allowed.
+		session.AdditionalProperties = map[string]interface{}{"userinfo": acceptance.Session.UserInfo}
+	}
 	request := hydraapi.NewAcceptOAuth2ConsentRequest()
 	request.SetGrantScope(append([]string(nil), acceptance.GrantScopes...))
 	if len(acceptance.GrantAudience) > 0 {

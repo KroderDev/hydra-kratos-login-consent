@@ -135,6 +135,7 @@ type policyResponse struct {
 type claimsResponse struct {
 	IDToken     map[string]any `json:"id_token"`
 	AccessToken map[string]any `json:"access_token"`
+	UserInfo    map[string]any `json:"userinfo"`
 }
 
 func (r policyResponse) decision(input ports.PolicyInput) (ports.ConsentDecision, error) {
@@ -172,11 +173,11 @@ func claimsFromResponse(value *claimsResponse) domain.Claims {
 	if value == nil {
 		return domain.Claims{}
 	}
-	return domain.Claims{IDToken: value.IDToken, AccessToken: value.AccessToken}
+	return domain.Claims{IDToken: value.IDToken, AccessToken: value.AccessToken, UserInfo: value.UserInfo}
 }
 
 func claimsPresent(value *claimsResponse) bool {
-	return value != nil && (len(value.IDToken) != 0 || len(value.AccessToken) != 0)
+	return value != nil && (len(value.IDToken) != 0 || len(value.AccessToken) != 0 || len(value.UserInfo) != 0)
 }
 
 func validateValues(values []string) error {

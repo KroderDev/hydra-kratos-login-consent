@@ -72,6 +72,7 @@ type Session struct {
 type Claims struct {
 	IDToken     map[string]any
 	AccessToken map[string]any
+	UserInfo    map[string]any
 }
 
 // Transaction is short-lived state bound to one Hydra browser challenge.

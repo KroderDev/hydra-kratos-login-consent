@@ -54,15 +54,27 @@ func TestStaticConsentClonesClaims(t *testing.T) {
 	t.Parallel()
 
 	policy := NewStatic([]string{"operator-1"}, nil)
-	policy.Claims = domain.Claims{IDToken: map[string]any{"email": "operator@example.com"}}
+	policy.Claims = domain.Claims{
+		IDToken:     map[string]any{"email": "operator@example.com"},
+		AccessToken: map[string]any{"tenant": "tenant-a"},
+		UserInfo:    map[string]any{"phone_number": "+15550100"},
+	}
 
 	decision, err := policy.AuthorizeConsent(context.Background(), ports.PolicyInput{Subject: "operator-1", ClientID: "client-1"})
 	if err != nil {
 		t.Fatalf("AuthorizeConsent: %v", err)
 	}
 	decision.Claims.IDToken["email"] = "changed"
+	decision.Claims.AccessToken["tenant"] = "changed"
+	decision.Claims.UserInfo["phone_number"] = "changed"
 	if got := policy.Claims.IDToken["email"]; got != "operator@example.com" {
 		t.Fatalf("policy claim mutated through decision: %v", got)
+	}
+	if got := policy.Claims.AccessToken["tenant"]; got != "tenant-a" {
+		t.Fatalf("policy access-token claim mutated through decision: %v", got)
+	}
+	if got := policy.Claims.UserInfo["phone_number"]; got != "+15550100" {
+		t.Fatalf("policy userinfo claim mutated through decision: %v", got)
 	}
 }
 
@@ -70,7 +82,10 @@ func TestStaticDeniedConsentDoesNotReturnClaims(t *testing.T) {
 	t.Parallel()
 
 	policy := NewStatic([]string{"operator-1"}, nil)
-	policy.Claims = domain.Claims{IDToken: map[string]any{"role": "admin"}}
+	policy.Claims = domain.Claims{
+		IDToken:  map[string]any{"role": "admin"},
+		UserInfo: map[string]any{"phone_number": "+15550100"},
+	}
 	decision, err := policy.AuthorizeConsent(context.Background(), ports.PolicyInput{
 		Subject:  "operator-2",
 		ClientID: "client-1",
@@ -81,7 +96,7 @@ func TestStaticDeniedConsentDoesNotReturnClaims(t *testing.T) {
 	if decision.Allowed {
 		t.Fatal("consent was allowed for an unknown subject")
 	}
-	if decision.Claims.IDToken != nil || decision.Claims.AccessToken != nil {
+	if decision.Claims.IDToken != nil || decision.Claims.AccessToken != nil || decision.Claims.UserInfo != nil {
 		t.Fatalf("denied decision returned claims: %#v", decision.Claims)
 	}
 }

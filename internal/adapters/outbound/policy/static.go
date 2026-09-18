@@ -115,6 +115,7 @@ func cloneClaims(claims domain.Claims) domain.Claims {
 	return domain.Claims{
 		IDToken:     cloneMap(claims.IDToken),
 		AccessToken: cloneMap(claims.AccessToken),
+		UserInfo:    cloneMap(claims.UserInfo),
 	}
 }
 

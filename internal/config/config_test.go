@@ -10,7 +10,7 @@ import (
 //nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
 func TestLoadDefaultsAndClientIDs(t *testing.T) {
 	setRequiredEnvironment(t)
-	t.Setenv("ALLOWED_CLIENTS", `{"example-client":{"allowed_redirect_uris":["https://client.example/callback"]}}`)
+	t.Setenv("ALLOWED_CLIENTS", `{"example-client":{"allowed_redirect_uris":["https://client.example/callback"],"allowed_scopes":["openid"],"allowed_userinfo_claims":{"phone_number":["openid"]}}}`)
 
 	cfg, err := Load()
 	if err != nil {
@@ -38,6 +38,12 @@ func TestLoadDefaultsAndClientIDs(t *testing.T) {
 	client, ok := cfg.Clients["example-client"]
 	if !ok || client.ID != "example-client" {
 		t.Fatalf("client = %#v, want client ID populated from map key", client)
+	}
+	if got := client.AllowedUserInfoClaims["phone_number"]; len(got) != 1 || got[0] != "openid" {
+		t.Fatalf("userinfo claims = %#v, want parsed allowlist", client.AllowedUserInfoClaims)
+	}
+	if len(client.AllowedIDTokenClaims) != 0 || len(client.AllowedAccessTokenClaims) != 0 {
+		t.Fatalf("token claim allowlists = %#v/%#v, want absent allowlists preserved", client.AllowedIDTokenClaims, client.AllowedAccessTokenClaims)
 	}
 }
 

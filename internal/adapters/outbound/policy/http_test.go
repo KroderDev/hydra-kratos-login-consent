@@ -249,11 +249,11 @@ func TestHTTPPolicyAuthorizationMatrix(t *testing.T) {
 				if !equalStrings(decision.GrantedScopes, tt.wantScopes) || !equalStrings(decision.GrantedAudiences, tt.wantAudiences) {
 					t.Fatalf("decision grants = %#v/%#v, want %#v/%#v", decision.GrantedScopes, decision.GrantedAudiences, tt.wantScopes, tt.wantAudiences)
 				}
-				if decision.Claims.IDToken["email"] != "operator@example.com" || decision.Claims.AccessToken["tenant"] != "tenant-a" {
+				if decision.Claims.IDToken["email"] != "operator@example.com" || decision.Claims.AccessToken["tenant"] != "tenant-a" || decision.Claims.UserInfo["phone_number"] != "+15550100" {
 					t.Fatalf("decision claims = %#v, want application claims", decision.Claims)
 				}
 			}
-			if tt.operation == "consent" && !tt.wantAllowed && (len(decision.GrantedScopes) != 0 || len(decision.GrantedAudiences) != 0 || len(decision.Claims.IDToken) != 0 || len(decision.Claims.AccessToken) != 0) {
+			if tt.operation == "consent" && !tt.wantAllowed && (len(decision.GrantedScopes) != 0 || len(decision.GrantedAudiences) != 0 || len(decision.Claims.IDToken) != 0 || len(decision.Claims.AccessToken) != 0 || len(decision.Claims.UserInfo) != 0) {
 				t.Fatalf("denied decision returned grants or claims: %#v", decision)
 			}
 		})
@@ -298,6 +298,7 @@ func TestHTTPPolicyRejectsMalformedAndUnsafeResponses(t *testing.T) {
 		{name: "missing version", body: `{"allowed":true,"granted_scopes":[],"granted_audiences":[]}`, code: http.StatusOK},
 		{name: "invalid json", body: `{`, code: http.StatusOK},
 		{name: "denied with claims", body: `{"version":"v1","allowed":false,"granted_scopes":[],"granted_audiences":[],"claims":{"id_token":{"role":"admin"}}}`, code: http.StatusOK},
+		{name: "denied with userinfo claims", body: `{"version":"v1","allowed":false,"granted_scopes":[],"granted_audiences":[],"claims":{"userinfo":{"role":"admin"}}}`, code: http.StatusOK},
 		{name: "expanded scope", body: `{"version":"v1","allowed":true,"granted_scopes":["admin"],"granted_audiences":[]}`, code: http.StatusOK},
 		{name: "empty scope", body: `{"version":"v1","allowed":true,"granted_scopes":[""],"granted_audiences":[]}`, code: http.StatusOK},
 		{name: "empty audience", body: `{"version":"v1","allowed":true,"granted_scopes":[],"granted_audiences":[""]}`, code: http.StatusOK},
@@ -636,6 +637,7 @@ func policyDecisionBody(allowed bool, scopes, audiences []string) map[string]any
 		response["claims"] = map[string]any{
 			"id_token":     map[string]any{"email": "operator@example.com"},
 			"access_token": map[string]any{"tenant": "tenant-a"},
+			"userinfo":     map[string]any{"phone_number": "+15550100"},
 		}
 	}
 	return response

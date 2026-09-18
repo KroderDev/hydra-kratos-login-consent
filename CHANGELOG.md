@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.6.0...v0.7.0) (2026-09-18)
+
+
+### Features
+
+* **identity:** add destination-specific UserInfo claim support ([699dacb](https://github.com/KroderDev/hydra-kratos-login-consent/commit/699dacb9064995e9f356339edd3ec447c3500f5d))
+* **identity:** document OIDC flows and isolate claim destinations ([1887944](https://github.com/KroderDev/hydra-kratos-login-consent/commit/188794466b79b63db4e40617e4c26bc8b71ed19b))
+
+
+### Bug Fixes
+
+* **identity:** fail closed for unsupported Hydra UserInfo claims ([b73ceca](https://github.com/KroderDev/hydra-kratos-login-consent/commit/b73cecabbfafdbb9c1ee900551446d9f0cae1bdc))
+
+
+### Documentation
+
+* document OIDC ACR mappings and prompt handling ([#57](https://github.com/KroderDev/hydra-kratos-login-consent/issues/57), [#59](https://github.com/KroderDev/hydra-kratos-login-consent/issues/59)) ([15c18ef](https://github.com/KroderDev/hydra-kratos-login-consent/commit/15c18ef99d4905bc0926b0ffcaaf49f6237908b1))
+
 ## [0.6.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.5.4...v0.6.0) (2026-09-17)
 
 

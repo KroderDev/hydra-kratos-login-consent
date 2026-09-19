@@ -29,7 +29,7 @@ func TestLoadDefaultsAndClientIDs(t *testing.T) {
 			coreconfig.DefaultMaxChallengeLength,
 		)
 	}
-	if cfg.PolicyBackend != PolicyBackendStatic || cfg.PolicyURL != nil {
+	if cfg.PolicyBackend != PolicyBackendStatic || cfg.PolicyURL != nil || cfg.PolicyIssuer != nil {
 		t.Fatalf("policy config = %#v, want static defaults", cfg)
 	}
 	if len(cfg.OIDCIdentityClaimMappings) != 0 {
@@ -126,13 +126,14 @@ func TestLoadParsesHTTPPolicyConfiguration(t *testing.T) {
 	setRequiredEnvironment(t)
 	t.Setenv("POLICY_BACKEND", " HTTP ")
 	t.Setenv("POLICY_URL", "http://policy.example/v1/authorize")
+	t.Setenv("POLICY_ISSUER", "https://issuer.example")
 	t.Setenv("POLICY_AUTH_TOKEN", " policy-secret ")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.PolicyBackend != PolicyBackendHTTP || cfg.PolicyURL == nil || cfg.PolicyURL.String() != "http://policy.example/v1/authorize" {
+	if cfg.PolicyBackend != PolicyBackendHTTP || cfg.PolicyURL == nil || cfg.PolicyURL.String() != "http://policy.example/v1/authorize" || cfg.PolicyIssuer == nil || cfg.PolicyIssuer.String() != "https://issuer.example" {
 		t.Fatalf("policy config = %#v", cfg)
 	}
 }
@@ -144,6 +145,17 @@ func TestLoadRequiresHTTPPolicyURL(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load accepted HTTP policy backend without POLICY_URL")
+	}
+}
+
+//nolint:paralleltest // t.Setenv intentionally serializes process-wide environment changes.
+func TestLoadRequiresHTTPPolicyIssuer(t *testing.T) {
+	setRequiredEnvironment(t)
+	t.Setenv("POLICY_BACKEND", "http")
+	t.Setenv("POLICY_URL", "http://policy.example/v1/authorize")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load accepted HTTP policy backend without POLICY_ISSUER")
 	}
 }
 
@@ -173,6 +185,8 @@ func TestLoadRejectsMalformedConfiguredValues(t *testing.T) {
 		//nolint:gosec // Credential-shaped input is intentional malformed configuration coverage.
 		{name: "policy URL credentials", key: "POLICY_URL", value: "https://user:" + "pw" + "@policy.example/v1/authorize"},
 		{name: "policy URL fragment", key: "POLICY_URL", value: "https://policy.example/v1/authorize#fragment"},
+		{name: "policy issuer credentials", key: "POLICY_ISSUER", value: "https://user:" + "pw" + "@issuer.example"},
+		{name: "policy issuer query", key: "POLICY_ISSUER", value: "https://issuer.example?realm=operators"},
 		{name: "identity mapping pointer", key: "OIDC_IDENTITY_CLAIM_MAPPINGS", value: `{"email":{"sources":["traits/email"],"type":"string","format":"email"}}`},
 		{name: "identity reserved claim", key: "OIDC_IDENTITY_CLAIM_MAPPINGS", value: `{"sub":{"sources":["/traits/id"],"type":"string"}}`},
 		{name: "malformed acr mappings", key: "OIDC_ACR_MAPPINGS", value: "{"},
@@ -204,6 +218,7 @@ func setRequiredEnvironment(t *testing.T) {
 	t.Setenv("ENVIRONMENT", "")
 	t.Setenv("POLICY_BACKEND", "")
 	t.Setenv("POLICY_URL", "")
+	t.Setenv("POLICY_ISSUER", "")
 	t.Setenv("POLICY_AUTH_TOKEN", "")
 	t.Setenv("OIDC_IDENTITY_CLAIM_MAPPINGS", "")
 	t.Setenv("OIDC_ACR_MAPPINGS", "")

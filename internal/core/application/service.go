@@ -137,6 +137,7 @@ func (s *Service) StartLogin(ctx context.Context, challenge string, input ports.
 	forceLogin := prompts.login || prompts.selectAccount
 	if request.Skip && !forceLogin && requiredAAL == "" {
 		allowed, err := s.policy.AuthorizeLogin(ctx, ports.PolicyInput{
+			Issuer:   s.policyIssuer(),
 			Subject:  request.Subject,
 			ClientID: client.ID,
 		})
@@ -219,6 +220,7 @@ func (s *Service) CompleteLogin(ctx context.Context, handle string, input ports.
 		return s.rejectLoginFailure(ctx, transaction.Challenge, domain.ErrInsufficientAssurance, domain.ErrInsufficientAssurance)
 	}
 	allowed, err := s.policy.AuthorizeLogin(ctx, ports.PolicyInput{
+		Issuer:   s.policyIssuer(),
 		Subject:  session.Subject,
 		ClientID: transaction.ClientID,
 		AAL:      session.AAL,
@@ -522,6 +524,7 @@ func (s *Service) acceptConsentDecision(ctx context.Context, request domain.Cons
 		return s.rejectConsentFailure(ctx, request.Challenge, domain.ErrInvalidAudience, err)
 	}
 	decision, err := s.policy.AuthorizeConsent(ctx, ports.PolicyInput{
+		Issuer:             s.policyIssuer(),
 		Subject:            request.Subject,
 		ClientID:           client.ID,
 		RequestedScopes:    append([]string(nil), request.RequestedScopes...),
@@ -552,6 +555,13 @@ func (s *Service) acceptConsentDecision(ctx context.Context, request domain.Cons
 		RememberFor:   rememberFor,
 	})
 	return s.hydraRedirect(redirect, err)
+}
+
+func (s *Service) policyIssuer() string {
+	if s.cfg.PolicyIssuer == nil {
+		return ""
+	}
+	return s.cfg.PolicyIssuer.String()
 }
 
 func (s *Service) filterClaims(client config.Client, claims domain.Claims, session domain.Session, scopes []string) domain.Claims {

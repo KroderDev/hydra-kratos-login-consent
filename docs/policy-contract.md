@@ -29,6 +29,7 @@ assurance context:
 {
   "version": "v1",
   "operation": "consent",
+  "issuer": "https://issuer.example",
   "subject": "operator-1",
   "client_id": "example-client",
   "requested_scopes": ["openid", "profile"],
@@ -42,6 +43,11 @@ assurance context:
 `operation` is `login` or `consent`. Login requests send empty scope,
 audience, and assurance-method arrays when no authenticated Kratos session is
 available. Consent `granted_scopes` contains the user's selected scopes.
+
+`issuer` is the deployment-configured issuer for the operator identity realm.
+It is not derived from browser input, the OAuth client, or policy request data.
+The policy service must treat it as part of the canonical `(issuer, subject)`
+identity key.
 
 The policy service must treat all values as authorization input, not as proof
 of authentication. The provider has already validated the Hydra challenge,
@@ -107,8 +113,8 @@ also requires non-empty `ALLOWED_SUBJECT_SCOPES`, whose subject/client/scope
 rules restrict the scopes selected for consent.
 
 When `POLICY_BACKEND=http` is selected, `POLICY_URL` must be the complete
-versioned endpoint and `POLICY_AUTH_TOKEN` is required outside development and
-test. The HTTP backend does not read `ALLOWED_SUBJECT_SCOPES`; local client,
+versioned endpoint, `POLICY_ISSUER` must identify the configured operator realm,
+and `POLICY_AUTH_TOKEN` is required outside development and test. The HTTP backend does not read `ALLOWED_SUBJECT_SCOPES`; local client,
 redirect, scope, audience, and claim allowlists still apply before and after the
 remote decision.
 

@@ -397,23 +397,36 @@ func TestConfigValidatePolicyBackend(t *testing.T) {
 		{name: "defaults to static", mutate: func(_ *Config) {}},
 		{name: "rejects unknown backend", mutate: func(cfg *Config) { cfg.PolicyBackend = "database" }, wantErr: true},
 		{name: "requires http URL", mutate: func(cfg *Config) { cfg.PolicyBackend = PolicyBackendHTTP }, wantErr: true},
+		{name: "requires policy issuer", mutate: func(cfg *Config) {
+			cfg.PolicyBackend = PolicyBackendHTTP
+			cfg.PolicyURL = parse("http://policy.example/v1/authorize")
+		}, wantErr: true},
 		{name: "requires https outside development", mutate: func(cfg *Config) {
 			cfg.Environment = "production"
 			cfg.PolicyBackend = PolicyBackendHTTP
 			cfg.PolicyURL = parse("http://policy.example/v1/authorize")
+			cfg.PolicyIssuer = parse("https://issuer.example")
 		}, wantErr: true},
 		{name: "rejects query", mutate: func(cfg *Config) {
 			cfg.PolicyBackend = PolicyBackendHTTP
 			cfg.PolicyURL = parse("https://policy.example/v1/authorize?tenant=one")
+			cfg.PolicyIssuer = parse("https://issuer.example")
+		}, wantErr: true},
+		{name: "rejects issuer query", mutate: func(cfg *Config) {
+			cfg.PolicyBackend = PolicyBackendHTTP
+			cfg.PolicyURL = parse("https://policy.example/v1/authorize")
+			cfg.PolicyIssuer = parse("https://issuer.example?realm=operators")
 		}, wantErr: true},
 		{name: "accepts http backend", mutate: func(cfg *Config) {
 			cfg.PolicyBackend = PolicyBackendHTTP
 			cfg.PolicyURL = parse("http://policy.example/v1/authorize")
+			cfg.PolicyIssuer = parse("http://issuer.example")
 		}, wantErr: false},
 		{name: "accepts secure production backend", mutate: func(cfg *Config) {
 			cfg.Environment = "production"
 			cfg.PolicyBackend = PolicyBackendHTTP
 			cfg.PolicyURL = parse("https://policy.example/v1/authorize")
+			cfg.PolicyIssuer = parse("https://issuer.example")
 		}, wantErr: false},
 	}
 	for _, tt := range tests {

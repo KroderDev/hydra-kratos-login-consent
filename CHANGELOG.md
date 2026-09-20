@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.7.0...v0.8.0) (2026-09-20)
+
+
+### Features
+
+* **policy:** propagate operator issuer ([013c0a8](https://github.com/KroderDev/hydra-kratos-login-consent/commit/013c0a82487917ad029c816410cda30eb95ff8c5))
+* **policy:** propagate operator issuer to remote authorization ([5b630d6](https://github.com/KroderDev/hydra-kratos-login-consent/commit/5b630d6a45bcd72cef271a2bb23ca5087e4b5eb9))
+
+
+### Tests
+
+* **policy:** cover configured issuer ([0506870](https://github.com/KroderDev/hydra-kratos-login-consent/commit/05068700d8eec2dd6a1742fa3e5fe3d46594ccb5))
+* **realstack:** propagate policy issuer ([dba1ac4](https://github.com/KroderDev/hydra-kratos-login-consent/commit/dba1ac47a6a44e0b8ec31e0c40eb07188a9b7fbc))
+
 ## [0.7.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.6.0...v0.7.0) (2026-09-18)
 
 

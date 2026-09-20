@@ -47,6 +47,7 @@ No value is written to the repository or printed by the target.
 | `REALSTACK_PASSWORD` | Seeded operator identity |
 | `REALSTACK_BASIC_PASSWORD` | Seeded denied identity |
 | `REALSTACK_POLICY_TOKEN` | Provider-to-policy authentication |
+| `REALSTACK_POLICY_ISSUER` | Canonical Hydra issuer sent to the remote policy, default `http://127.0.0.1:4444/` |
 | `REALSTACK_PROVIDER_PORT` | Host port for the provider, default `18080` in the Make target |
 
 The Compose file itself defaults the provider port to `8080`; use the Make
@@ -68,6 +69,7 @@ export REALSTACK_KRATOS_CIPHER_SECRET="$(openssl rand -hex 16)"
 export REALSTACK_PASSWORD="$(openssl rand -hex 16)"
 export REALSTACK_BASIC_PASSWORD="$(openssl rand -hex 16)"
 export REALSTACK_POLICY_TOKEN="$(openssl rand -hex 32)"
+export REALSTACK_POLICY_ISSUER="http://127.0.0.1:4444/"
 export REALSTACK_PROVIDER_PORT=18080
 
 docker compose -p hydra-realstack -f docker-compose.realstack.yml down -v --remove-orphans

@@ -59,6 +59,39 @@ func TestService_StartLoginAndCompleteLogin(t *testing.T) {
 	if policy.loginInput.AAL != "aal2" || !reflect.DeepEqual(policy.loginInput.AMR, []string{"oidc", "totp"}) {
 		t.Fatalf("login policy input = %#v, want aal2 and oidc/totp", policy.loginInput)
 	}
+	if policy.loginInput.Issuer != "" {
+		t.Fatalf("static policy issuer = %q, want empty", policy.loginInput.Issuer)
+	}
+}
+
+func TestService_PropagatesConfiguredPolicyIssuer(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	cfg.PolicyIssuer, _ = url.Parse("https://issuer.example")
+	service, hydra, kratos, policy, _ := newTestServiceWithConfig(t, cfg)
+	hydra.login = domain.LoginRequest{Challenge: "login-challenge", Client: testClient()}
+	kratos.session = domain.Session{Subject: "operator-1", AAL: "aal2", AMR: []string{"oidc", "totp"}}
+	policy.loginAllowed = true
+
+	started, err := service.StartLogin(context.Background(), "login-challenge", ports.LoginStartInput{})
+	if err != nil {
+		t.Fatalf("start login: %v", err)
+	}
+	_, err = service.CompleteLogin(
+		context.Background(),
+		transactionFromRedirect(t, started.URL),
+		loginInputFromRedirect(t, started.URL, started.BrowserState, ports.SessionCredentials{
+			CookieName:  "ory_kratos_session",
+			CookieValue: "opaque-session",
+		}),
+	)
+	if err != nil {
+		t.Fatalf("complete login: %v", err)
+	}
+	if policy.loginInput.Issuer != "https://issuer.example" {
+		t.Fatalf("configured policy issuer = %q, want https://issuer.example", policy.loginInput.Issuer)
+	}
 }
 
 func TestService_CompleteLoginRejectsInvalidAssurance(t *testing.T) {
@@ -972,8 +1005,12 @@ func TestServiceReadyStopsAtFirstFailure(t *testing.T) {
 
 func newTestService(t *testing.T) (*Service, *fakeHydra, *fakeKratos, *fakePolicy, *time.Time) {
 	t.Helper()
+	return newTestServiceWithConfig(t, testConfig())
+}
+
+func newTestServiceWithConfig(t *testing.T, cfg config.Config) (*Service, *fakeHydra, *fakeKratos, *fakePolicy, *time.Time) {
+	t.Helper()
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	cfg := testConfig()
 	hydra := &fakeHydra{
 		loginRedirect:   "https://hydra.example/oauth2/auth/callback",
 		consentRedirect: "https://hydra.example/oauth2/consent/callback",

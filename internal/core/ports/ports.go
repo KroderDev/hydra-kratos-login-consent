@@ -141,6 +141,7 @@ type Policy interface {
 // PolicyInput contains the server-validated context used by an authorization
 // policy. GrantedScopes are the scopes selected by the user for consent.
 type PolicyInput struct {
+	Issuer             string
 	Subject            string
 	ClientID           string
 	RequestedScopes    []string

@@ -49,6 +49,7 @@ type Config struct {
 	Clients                   map[string]Client
 	PolicyBackend             PolicyBackend
 	PolicyURL                 *url.URL
+	PolicyIssuer              *url.URL
 	OIDCIdentityClaimMappings identity.ClaimMappings
 	OIDCACRMappings           map[string]string
 }
@@ -110,12 +111,23 @@ func (c Config) Validate() error {
 	if policyBackend != PolicyBackendStatic && policyBackend != PolicyBackendHTTP {
 		return fmt.Errorf("unsupported policy backend %q: want static or http", policyBackend)
 	}
+	if c.PolicyIssuer != nil {
+		if err := validateURL(c.PolicyIssuer, "policy issuer", secureTransport); err != nil {
+			return err
+		}
+		if c.PolicyIssuer.RawQuery != "" {
+			return fmt.Errorf("policy issuer must not contain a query")
+		}
+	}
 	if policyBackend == PolicyBackendHTTP {
 		if err := validateURL(c.PolicyURL, "policy URL", secureTransport); err != nil {
 			return err
 		}
 		if c.PolicyURL.RawQuery != "" {
 			return fmt.Errorf("policy URL must not contain a query")
+		}
+		if c.PolicyIssuer == nil {
+			return fmt.Errorf("policy issuer is required for http policy backend")
 		}
 	}
 	for id, client := range c.Clients {

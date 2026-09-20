@@ -25,6 +25,7 @@ e2e-realstack:
 	export REALSTACK_PASSWORD="$${REALSTACK_PASSWORD:-$$(openssl rand -hex 16)}"; \
 	export REALSTACK_BASIC_PASSWORD="$${REALSTACK_BASIC_PASSWORD:-$$(openssl rand -hex 16)}"; \
 	export REALSTACK_POLICY_TOKEN="$${REALSTACK_POLICY_TOKEN:-$$(openssl rand -hex 32)}"; \
+	export REALSTACK_POLICY_ISSUER="$${REALSTACK_POLICY_ISSUER:-http://127.0.0.1:4444/}"; \
 	export REALSTACK_PROVIDER_PORT="$${REALSTACK_PROVIDER_PORT:-18080}"; \
 	compose="docker compose -p $$project -f docker-compose.realstack.yml"; \
 	$$compose down -v --remove-orphans >/dev/null 2>&1 || true; \

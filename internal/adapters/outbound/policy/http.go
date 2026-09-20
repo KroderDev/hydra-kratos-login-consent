@@ -64,6 +64,7 @@ func (c *HTTP) authorize(ctx context.Context, operation string, input ports.Poli
 	payload := policyRequest{
 		Version:            contractVersion,
 		Operation:          operation,
+		Issuer:             input.Issuer,
 		Subject:            input.Subject,
 		ClientID:           input.ClientID,
 		RequestedScopes:    contractStrings(input.RequestedScopes),
@@ -114,6 +115,7 @@ func (c *HTTP) authorize(ctx context.Context, operation string, input ports.Poli
 type policyRequest struct {
 	Version            string   `json:"version"`
 	Operation          string   `json:"operation"`
+	Issuer             string   `json:"issuer"`
 	Subject            string   `json:"subject"`
 	ClientID           string   `json:"client_id"`
 	RequestedScopes    []string `json:"requested_scopes"`

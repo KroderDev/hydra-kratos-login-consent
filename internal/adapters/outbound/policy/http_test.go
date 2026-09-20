@@ -32,7 +32,7 @@ func TestHTTPAuthorizeConsentSendsVersionedRequest(t *testing.T) {
 			t.Errorf("decode policy request: %v", err)
 			return
 		}
-		if request.Version != contractVersion || request.Operation != "consent" || request.Subject != "operator-1" || request.ClientID != "client-1" {
+		if request.Version != contractVersion || request.Operation != "consent" || request.Issuer != "https://issuer.example" || request.Subject != "operator-1" || request.ClientID != "client-1" {
 			t.Errorf("request identity = %#v", request)
 		}
 		if !equalStrings(request.RequestedScopes, []string{"openid", "profile"}) || !equalStrings(request.GrantedScopes, []string{"openid"}) {
@@ -57,6 +57,7 @@ func TestHTTPAuthorizeConsentSendsVersionedRequest(t *testing.T) {
 		t.Fatalf("create policy client: %v", err)
 	}
 	decision, err := client.AuthorizeConsent(context.Background(), ports.PolicyInput{
+		Issuer:             "https://issuer.example",
 		Subject:            "operator-1",
 		ClientID:           "client-1",
 		RequestedScopes:    []string{"openid", "profile"},

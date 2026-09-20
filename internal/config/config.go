@@ -84,6 +84,10 @@ func Load() (coreconfig.Config, error) {
 	if err != nil {
 		return coreconfig.Config{}, err
 	}
+	policyIssuer, err := optionalURL("POLICY_ISSUER")
+	if err != nil {
+		return coreconfig.Config{}, err
+	}
 	identityClaimMappings, err := identity.ParseJSON(
 		os.Getenv("OIDC_IDENTITY_CLAIM_MAPPINGS"),
 		(coreconfig.Config{Environment: environment}).IsSecureEnvironment(),
@@ -125,6 +129,7 @@ func Load() (coreconfig.Config, error) {
 		Clients:                   clients,
 		PolicyBackend:             coreconfig.PolicyBackend(policyBackend),
 		PolicyURL:                 policyURL,
+		PolicyIssuer:              policyIssuer,
 		OIDCIdentityClaimMappings: identityClaimMappings,
 		OIDCACRMappings:           acrMappings,
 	}

@@ -417,6 +417,11 @@ func TestConfigValidatePolicyBackend(t *testing.T) {
 			cfg.PolicyURL = parse("https://policy.example/v1/authorize")
 			cfg.PolicyIssuer = parse("https://issuer.example?realm=operators")
 		}, wantErr: true},
+		{name: "rejects invalid issuer URL", mutate: func(cfg *Config) {
+			cfg.PolicyBackend = PolicyBackendHTTP
+			cfg.PolicyURL = parse("https://policy.example/v1/authorize")
+			cfg.PolicyIssuer = parse("ftp://issuer.example")
+		}, wantErr: true},
 		{name: "accepts http backend", mutate: func(cfg *Config) {
 			cfg.PolicyBackend = PolicyBackendHTTP
 			cfg.PolicyURL = parse("http://policy.example/v1/authorize")

@@ -25,6 +25,7 @@ const (
 
 type policyServer struct {
 	clientID     string
+	issuer       string
 	operatorMail string
 	deniedMail   string
 	token        []byte
@@ -35,6 +36,7 @@ type policyServer struct {
 type policyRequest struct {
 	Version            string   `json:"version"`
 	Operation          string   `json:"operation"`
+	Issuer             string   `json:"issuer"`
 	Subject            string   `json:"subject"`
 	ClientID           string   `json:"client_id"`
 	RequestedScopes    []string `json:"requested_scopes"`
@@ -107,6 +109,10 @@ func newPolicyServer() (*policyServer, error) {
 	if clientID == "" {
 		return nil, errors.New("REALSTACK_POLICY_CLIENT_ID is required")
 	}
+	issuer, err := requiredURL("REALSTACK_POLICY_ISSUER")
+	if err != nil {
+		return nil, err
+	}
 	operatorMail := strings.TrimSpace(os.Getenv("REALSTACK_POLICY_OPERATOR_EMAIL"))
 	if operatorMail == "" {
 		return nil, errors.New("REALSTACK_POLICY_OPERATOR_EMAIL is required")
@@ -125,6 +131,7 @@ func newPolicyServer() (*policyServer, error) {
 	}
 	return &policyServer{
 		clientID:     clientID,
+		issuer:       issuer.String(),
 		operatorMail: operatorMail,
 		deniedMail:   deniedMail,
 		token:        []byte(token),
@@ -225,7 +232,7 @@ func (s *policyServer) authorized(value string) bool {
 // evaluate authorizes only the configured operator with the required assurance.
 // Consent grants must be unique subsets of the corresponding requested values.
 func (s *policyServer) evaluate(input policyRequest) decision {
-	if input.Version != contractVersion || input.ClientID != s.clientID || input.Subject == "" || (input.Operation != "login" && input.Operation != "consent") {
+	if input.Version != contractVersion || input.Issuer != s.issuer || input.ClientID != s.clientID || input.Subject == "" || (input.Operation != "login" && input.Operation != "consent") {
 		return decision{}
 	}
 	identityEmail, known := s.identities[input.Subject]

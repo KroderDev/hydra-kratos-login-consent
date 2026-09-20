@@ -59,6 +59,9 @@ func TestService_StartLoginAndCompleteLogin(t *testing.T) {
 	if policy.loginInput.AAL != "aal2" || !reflect.DeepEqual(policy.loginInput.AMR, []string{"oidc", "totp"}) {
 		t.Fatalf("login policy input = %#v, want aal2 and oidc/totp", policy.loginInput)
 	}
+	if policy.loginInput.Issuer != "" {
+		t.Fatalf("static policy issuer = %q, want empty", policy.loginInput.Issuer)
+	}
 }
 
 func TestService_CompleteLoginRejectsInvalidAssurance(t *testing.T) {

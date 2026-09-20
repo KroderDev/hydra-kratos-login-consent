@@ -152,6 +152,7 @@ services:
         condition: service_completed_successfully
     environment:
       REALSTACK_POLICY_TOKEN: "${REALSTACK_POLICY_TOKEN:?REALSTACK_POLICY_TOKEN must be set}"
+      REALSTACK_POLICY_ISSUER: "${REALSTACK_POLICY_ISSUER:?REALSTACK_POLICY_ISSUER must be set}"
       REALSTACK_POLICY_CLIENT_ID: realstack-client
       REALSTACK_POLICY_OPERATOR_EMAIL: operator@example.com
       REALSTACK_POLICY_DENY_EMAIL: basic@example.com
@@ -215,6 +216,7 @@ services:
       POLICY_BACKEND: http
       POLICY_URL: http://policy:8090/v1/authorize
       POLICY_AUTH_TOKEN: "${REALSTACK_POLICY_TOKEN:?REALSTACK_POLICY_TOKEN must be set}"
+      POLICY_ISSUER: "${REALSTACK_POLICY_ISSUER:?REALSTACK_POLICY_ISSUER must be set}"
       ALLOWED_CLIENTS: '{"realstack-client":{"allowed_redirect_uris":["http://127.0.0.1:5555/callback"],"allowed_post_logout_redirect_uris":["http://127.0.0.1:5555/logout-callback"],"allowed_scopes":["openid","profile","email"],"allowed_audiences":["https://api.example.test"],"allowed_id_token_claims":{"email":["email"],"role":["profile"]},"allowed_access_token_claims":{"tenant":[]}}}'
       OIDC_IDENTITY_CLAIM_MAPPINGS: '{"email":{"source":"/traits/email","type":"string","format":"email"}}'
       STATE_STORE: redis

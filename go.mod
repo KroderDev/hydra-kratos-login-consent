@@ -1,6 +1,6 @@
 module github.com/kroderdev/hydra-kratos-login-consent
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.39.0
@@ -8,7 +8,7 @@ require (
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/ory/hydra-client-go/v26 v26.2.0
 	github.com/redis/go-redis/v9 v9.22.0
-	golang.org/x/oauth2 v0.36.0
+	golang.org/x/oauth2 v0.37.0
 )
 
 require (

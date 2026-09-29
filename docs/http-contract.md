@@ -92,8 +92,9 @@ query parameter from Hydra fails closed as an upstream error.
 Login behavior:
 
 - Without a forcing prompt, a login that Hydra reports as skippable (`skip`) and
-  that has no request-specific assurance requirement may complete without a UI
-  redirect after the provider evaluates the login policy.
+  that has no configured or request-specific assurance requirement may complete
+  without a UI redirect after the provider evaluates the login policy. The
+  default `REQUIRED_AAL=aal2` requires the interactive path.
 - `prompt=login` and `prompt=select_account` prevent silent acceptance and add
   `force_reauth=true` to the UI handoff so the UI re-authenticates the browser
   instead of reusing an existing session. `prompt=consent` has no additional
@@ -103,9 +104,9 @@ Login behavior:
   forwarded as `aal=<aal>`.
 - `prompt=none` rejects the Hydra login challenge with `login_required` without
   redirecting to the UI whenever interaction would be required: a login Hydra
-  does not report as skippable, or any request-specific ACR/AAL requirement.
-  A skippable login with no such requirement may complete silently, subject to
-  the login policy.
+  does not report as skippable, or a configured or request-specific ACR/AAL
+  requirement. A skippable login with no such requirement may complete silently,
+  subject to the login policy.
 
 Freshness is revalidated server-side when the login callback completes:
 

@@ -41,6 +41,7 @@ explicitly allowlisted native-app loopback IP literals described below.
 | `ALLOWED_SUBJECT_SCOPES` | empty | JSON subject-to-client-to-scope rules for the static policy backend. Required in secure environments when `POLICY_BACKEND=static`; not used by the HTTP policy backend. |
 | `POLICY_BACKEND` | `static` | `static` for the local allowlist adapter or `http` for the versioned remote policy adapter. |
 | `POLICY_URL` | empty | Complete versioned policy endpoint, required when `POLICY_BACKEND=http`. It must have no URL credentials, query, or fragment and must use `https` in secure environments. |
+| `POLICY_ISSUER` | empty | Canonical operator-realm issuer included in HTTP policy decisions, required when `POLICY_BACKEND=http`. It must be an absolute HTTP(S) URL without credentials, query, or fragment, and use `https` in secure environments. |
 | `POLICY_AUTH_TOKEN` | empty | Bearer credential sent only to the HTTP policy endpoint. Required when `POLICY_BACKEND=http` in secure environments. |
 | `HYDRA_ADMIN_TOKEN` | empty | Bearer credential sent only to Hydra admin requests. Required in secure environments. |
 | `STATE_STORE` | `memory` | `memory` for local development and tests or `redis` for shared Redis/Valkey state. Secure environments must use `redis`. |
@@ -272,7 +273,8 @@ the request, and return effective scopes and audiences. Remote grants may only
 reduce the locally validated grants. Missing, malformed, oversized, denied-with-
 grants, or unavailable policy responses fail closed.
 
-The HTTP policy contract is specified in [policy-contract.md](policy-contract.md).
+See the [HTTP policy contract](policy-contract.md) and its
+[self-service onboarding recipe](policy-contract.md#recipe-self-service-onboarding).
 
 ## State Store
 
@@ -311,6 +313,7 @@ REDIS_URL=rediss://redis.internal:6380/0
 REDIS_KEY_PREFIX=provider-production:transaction:
 POLICY_BACKEND=http
 POLICY_URL=https://policy.example/v1/authorize
+POLICY_ISSUER=https://issuer.example
 ```
 
 Supply `ALLOWED_CLIENTS`, `HYDRA_ADMIN_TOKEN`, and `POLICY_AUTH_TOKEN` through

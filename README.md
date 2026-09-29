@@ -96,6 +96,7 @@ The server reads configuration from environment variables:
 | `ALLOWED_SUBJECT_SCOPES` | JSON subject/client/scope rules for static policy; required in secure environments only when `POLICY_BACKEND=static`. |
 | `POLICY_BACKEND` | Policy backend, `static` by default or `http`. |
 | `POLICY_URL` | Complete versioned HTTP policy endpoint when `POLICY_BACKEND=http`. |
+| `POLICY_ISSUER` | Canonical operator-realm issuer required for the HTTP policy backend. |
 | `POLICY_AUTH_TOKEN` | Runtime bearer credential for the HTTP policy backend; required in secure HTTP policy deployments. |
 | `HYDRA_ADMIN_TOKEN` | Runtime bearer token for Hydra admin requests; required in secure environments. |
 | `STATE_STORE` | Transaction store, `memory` by default or `redis`; secure environments require `redis`. |
@@ -136,13 +137,15 @@ strings to `aal1`, `aal2`, or `aal3`, while those built-in AAL values need no
 mapping. The requested ACR value is returned to Hydra on acceptance. See
 [OIDC ACR mappings](docs/configuration.md#oidc-acr-mappings).
 With `POLICY_BACKEND=static`, `ALLOWED_SUBJECT_SCOPES` is required outside
-development and test. With `POLICY_BACKEND=http`, `POLICY_URL` and its
-server-side bearer credential are required in secure environments instead;
-`ALLOWED_SUBJECT_SCOPES` is not used. See the [configuration reference](docs/configuration.md)
-for the complete policy and allowlist contract.
+development and test. With `POLICY_BACKEND=http`, `POLICY_URL` and
+`POLICY_ISSUER` are required, as is the server-side bearer credential in secure
+environments; static subject rules are not used. See the
+[configuration reference](docs/configuration.md) for the complete policy and
+allowlist contract.
 
 See [the remote policy contract](docs/policy-contract.md) for request,
-response, authentication, timeout, and fail-closed behavior.
+response, authentication, timeout, and fail-closed behavior, including a
+[self-service onboarding recipe](docs/policy-contract.md#recipe-self-service-onboarding).
 
 ## Development
 

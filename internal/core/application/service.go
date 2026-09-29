@@ -180,7 +180,11 @@ func (s *Service) StartLogin(ctx context.Context, challenge string, input ports.
 	if err != nil {
 		return RedirectResult{}, err
 	}
-	redirect, err := s.cfg.ExternalRedirect(domain.FlowLogin, handle, transaction.CSRFToken)
+	redirect, err := s.cfg.ExternalRedirect(domain.FlowLogin, handle, transaction.CSRFToken, domain.LoginUIHints{
+		LoginHint: request.LoginHint,
+		UILocales: request.UILocales,
+		Display:   request.Display,
+	})
 	if err == nil && (forceLogin || (request.MaxAge != nil && *request.MaxAge == 0)) {
 		redirect, err = addQueryValue(redirect, "force_reauth", "true")
 	}
@@ -403,7 +407,7 @@ func (s *Service) StartLogout(ctx context.Context, challenge string, input ports
 	if err != nil {
 		return RedirectResult{}, err
 	}
-	redirect, err := s.cfg.ExternalRedirect(domain.FlowLogout, handle, transaction.CSRFToken)
+	redirect, err := s.cfg.ExternalRedirect(domain.FlowLogout, handle, transaction.CSRFToken, domain.LoginUIHints{})
 	return RedirectResult{URL: redirect, BrowserState: transaction.BrowserState}, err
 }
 

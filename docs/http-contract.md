@@ -19,6 +19,8 @@ Kratos APIs are never proxied to the browser or external UI.
      `max_age=0` requires the UI to re-authenticate the browser session
    - `max_age=<seconds>` when Hydra requested a nonnegative `max_age`
    - `aal=<aal>` when a request-specific assurance level was resolved
+   - `login_hint=<identifier>`, `ui_locales=<space-separated locales>`, and
+     `display=<page|popup|touch|wap>` when Hydra supplies safe OIDC UI hints
 
    The callback query is nested inside `return_to`, so its `?`, `&`, and `=`
    separators are percent-encoded in the external UI URL. Treat `return_to` as
@@ -33,6 +35,12 @@ Kratos APIs are never proxied to the browser or external UI.
 
 The Hydra challenge and any provider credentials are never included in the UI
 redirect.
+OIDC UI hints are optional presentation data, not trusted identity or policy
+inputs. The provider trims and bounds the login hint, rejects control characters,
+limits locales to eight short ASCII tags, and allowlists display modes.
+Malformed hints are omitted independently. The UI should render hints as text
+and choose a supported locale; none of these hints is included in `return_to` or
+stored in the transaction.
 
 ## Consent
 

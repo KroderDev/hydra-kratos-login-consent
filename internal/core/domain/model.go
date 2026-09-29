@@ -33,6 +33,9 @@ type LoginRequest struct {
 	RequestedACRValues []string
 	Prompt             string
 	MaxAge             *int64
+	LoginHint          string
+	UILocales          string
+	Display            string
 }
 
 // ConsentRequest is the Hydra consent request needed by the provider flow.

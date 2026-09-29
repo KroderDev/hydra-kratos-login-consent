@@ -50,8 +50,8 @@ func New(baseURL *url.URL, httpClient *http.Client, token string) (*Client, erro
 	return &Client{api: hydraapi.NewAPIClient(configuration)}, nil
 }
 
-// GetLoginRequest retrieves a Hydra login challenge and preserves its requested
-// prompt, max_age, and ACR values for application-level validation.
+// GetLoginRequest retrieves a Hydra login challenge, preserving its requested
+// prompt, max_age, and ACR values and sanitizing optional UI hints.
 func (c *Client) GetLoginRequest(ctx context.Context, challenge string) (domain.LoginRequest, error) {
 	response, httpResponse, err := c.api.OAuth2API.GetOAuth2LoginRequest(ctx).
 		LoginChallenge(challenge).
@@ -68,6 +68,14 @@ func (c *Client) GetLoginRequest(ctx context.Context, challenge string) (domain.
 		return domain.LoginRequest{}, err
 	}
 	acrValues := requestedACRValues(response.OidcContext)
+	var hints domain.LoginUIHints
+	if response.OidcContext != nil {
+		hints = domain.SafeLoginUIHints(domain.LoginUIHints{
+			LoginHint: response.OidcContext.GetLoginHint(),
+			UILocales: strings.Join(response.OidcContext.GetUiLocales(), " "),
+			Display:   response.OidcContext.GetDisplay(),
+		})
+	}
 	return domain.LoginRequest{
 		Challenge:          response.Challenge,
 		Client:             clientDomain(response.Client),
@@ -77,6 +85,9 @@ func (c *Client) GetLoginRequest(ctx context.Context, challenge string) (domain.
 		RequestedACRValues: acrValues,
 		Prompt:             prompt,
 		MaxAge:             maxAge,
+		LoginHint:          hints.LoginHint,
+		UILocales:          hints.UILocales,
+		Display:            hints.Display,
 	}, nil
 }
 

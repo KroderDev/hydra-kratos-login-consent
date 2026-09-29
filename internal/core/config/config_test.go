@@ -16,7 +16,7 @@ func TestConfigExternalRedirect(t *testing.T) {
 
 	cfg := validConfig(t)
 
-	redirect, err := cfg.ExternalRedirect(domain.FlowLogin, "opaque-handle", "csrf-token")
+	redirect, err := cfg.ExternalRedirect(domain.FlowLogin, "opaque-handle", "csrf-token", domain.LoginUIHints{})
 	if err != nil {
 		t.Fatalf("ExternalRedirect: %v", err)
 	}
@@ -57,8 +57,55 @@ func TestConfigExternalRedirect(t *testing.T) {
 		t.Fatalf("return_to nested query was not encoded in the outer URL: %q", parsed.RawQuery)
 	}
 
-	if _, err := cfg.ExternalRedirect(domain.FlowLogin, "", "csrf-token"); !errors.Is(err, domain.ErrInvalidTransaction) {
+	if _, err := cfg.ExternalRedirect(domain.FlowLogin, "", "csrf-token", domain.LoginUIHints{}); !errors.Is(err, domain.ErrInvalidTransaction) {
 		t.Fatalf("empty transaction error = %v, want invalid transaction", err)
+	}
+}
+
+func TestConfigExternalRedirectLoginUIHints(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig(t)
+	cfg.ExternalUIURL.RawQuery = "old=discarded"
+	hints := domain.LoginUIHints{LoginHint: "name+tag@example.test&flow=logout", UILocales: "en-US fr-CA", Display: "popup"}
+	redirect, err := cfg.ExternalRedirect(domain.FlowLogin, "opaque-handle", "csrf-token", hints)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(redirect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	if query.Get("login_hint") != hints.LoginHint || query.Get("ui_locales") != hints.UILocales || query.Get("display") != hints.Display || query.Get("flow") != "login" || query.Has("old") {
+		t.Fatalf("login redirect query = %q", parsed.RawQuery)
+	}
+	logout, err := cfg.ExternalRedirect(domain.FlowLogout, "opaque-handle", "csrf-token", hints)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logoutURL, err := url.Parse(logout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logoutURL.Query().Has("login_hint") || logoutURL.Query().Has("ui_locales") || logoutURL.Query().Has("display") {
+		t.Fatalf("login hints forwarded on logout: %q", logoutURL.RawQuery)
+	}
+	unsafe, err := cfg.ExternalRedirect(domain.FlowLogin, "opaque-handle", "csrf-token", domain.LoginUIHints{
+		LoginHint: "user\nInjected: x",
+		UILocales: "en--US",
+		Display:   "unknown",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsafeURL, err := url.Parse(unsafe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"login_hint", "ui_locales", "display"} {
+		if unsafeURL.Query().Has(key) {
+			t.Fatalf("unsafe %s forwarded: %q", key, unsafeURL.RawQuery)
+		}
 	}
 }
 
@@ -336,7 +383,7 @@ func TestConfigExternalUIOriginAndRedirectValidation(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := cfg.ExternalRedirect(domain.FlowLogin, args[0], args[1]); !errors.Is(err, domain.ErrInvalidTransaction) {
+			if _, err := cfg.ExternalRedirect(domain.FlowLogin, args[0], args[1], domain.LoginUIHints{}); !errors.Is(err, domain.ErrInvalidTransaction) {
 				t.Fatalf("error = %v, want invalid transaction", err)
 			}
 		})

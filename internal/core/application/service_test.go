@@ -1254,14 +1254,14 @@ func TestService_Security_OpenRedirectBypass(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if _, err := cfg.ExternalRedirect(tt.flow, tt.transaction, tt.csrfToken); !errors.Is(err, domain.ErrInvalidTransaction) {
+			if _, err := cfg.ExternalRedirect(tt.flow, tt.transaction, tt.csrfToken, domain.LoginUIHints{}); !errors.Is(err, domain.ErrInvalidTransaction) {
 				t.Fatalf("ExternalRedirect(%q, %q, %q) error = %v, want %v", tt.flow, tt.transaction, tt.csrfToken, err, domain.ErrInvalidTransaction)
 			}
 		})
 	}
 
 	// Verify that constructed redirects maintain strict host origin and do not permit scheme injection
-	redirectURL, err := cfg.ExternalRedirect(domain.FlowLogin, "tx-123", "csrf-456")
+	redirectURL, err := cfg.ExternalRedirect(domain.FlowLogin, "tx-123", "csrf-456", domain.LoginUIHints{})
 	if err != nil {
 		t.Fatalf("ExternalRedirect unexpected error: %v", err)
 	}

@@ -22,6 +22,9 @@ func TestService_StartLoginPreservesOIDCRequestContext(t *testing.T) {
 		RequestedACRValues: []string{"urn:example:aal3", "aal2"},
 		Prompt:             "login",
 		MaxAge:             int64Pointer(60),
+		LoginHint:          "user+tag@example.test",
+		UILocales:          "fr-CA en-US",
+		Display:            "popup",
 	}
 
 	started, err := service.StartLogin(context.Background(), hydra.login.Challenge, ports.LoginStartInput{})
@@ -35,6 +38,18 @@ func TestService_StartLoginPreservesOIDCRequestContext(t *testing.T) {
 	query := parsed.Query()
 	if query.Get("force_reauth") != "true" || query.Get("max_age") != "60" || query.Get("aal") != "aal3" {
 		t.Fatalf("handoff query = %q, want reauthentication, max_age, and aal3", parsed.RawQuery)
+	}
+	if query.Get("login_hint") != "user+tag@example.test" || query.Get("ui_locales") != "fr-CA en-US" || query.Get("display") != "popup" {
+		t.Fatalf("handoff query = %q, want OIDC presentation hints", parsed.RawQuery)
+	}
+	callback, err := url.Parse(query.Get("return_to"))
+	if err != nil {
+		t.Fatalf("parse return_to: %v", err)
+	}
+	for _, key := range []string{"login_hint", "ui_locales", "display"} {
+		if _, ok := callback.Query()[key]; ok {
+			t.Fatalf("presentation hint %q leaked into callback", key)
+		}
 	}
 	transaction, err := service.state.Get(context.Background(), query.Get("transaction"))
 	if err != nil {

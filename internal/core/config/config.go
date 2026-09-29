@@ -231,7 +231,7 @@ func (c Config) Client(id string) (Client, bool) {
 }
 
 // ExternalRedirect builds a fixed-origin external UI handoff URL.
-func (c Config) ExternalRedirect(flow domain.Flow, transaction, csrfToken string) (string, error) {
+func (c Config) ExternalRedirect(flow domain.Flow, transaction, csrfToken string, hints domain.LoginUIHints) (string, error) {
 	if (flow != domain.FlowLogin && flow != domain.FlowConsent && flow != domain.FlowLogout) || transaction == "" || csrfToken == "" {
 		return "", domain.ErrInvalidTransaction
 	}
@@ -243,12 +243,25 @@ func (c Config) ExternalRedirect(flow domain.Flow, transaction, csrfToken string
 	}.Encode()
 
 	redirect := *c.ExternalUIURL
-	redirect.RawQuery = url.Values{
+	query := url.Values{
 		"flow":        {string(flow)},
 		"transaction": {transaction},
 		"csrf":        {csrfToken},
 		"return_to":   {callback.String()},
-	}.Encode()
+	}
+	if flow == domain.FlowLogin {
+		hints = domain.SafeLoginUIHints(hints)
+		if hints.LoginHint != "" {
+			query.Set("login_hint", hints.LoginHint)
+		}
+		if hints.UILocales != "" {
+			query.Set("ui_locales", hints.UILocales)
+		}
+		if hints.Display != "" {
+			query.Set("display", hints.Display)
+		}
+	}
+	redirect.RawQuery = query.Encode()
 	return redirect.String(), nil
 }
 

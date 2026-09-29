@@ -73,10 +73,15 @@ func TestClient_GetLoginRequestMapsAllOIDCContext(t *testing.T) {
 			"client": map[string]any{
 				"client_id": "example-client",
 			},
-			"request_url":  "https://hydra.example/oauth2/auth?prompt=login&max_age=60",
-			"oidc_context": map[string]any{"acr_values": []string{"urn:example:aal3", "aal2"}},
-			"skip":         false,
-			"subject":      "",
+			"request_url": "https://hydra.example/oauth2/auth?prompt=login&max_age=60",
+			"oidc_context": map[string]any{
+				"acr_values": []string{"urn:example:aal3", "aal2"},
+				"login_hint": " user+tag@example.test ",
+				"ui_locales": []string{"fr-CA", "en-US"},
+				"display":    "popup",
+			},
+			"skip":    false,
+			"subject": "",
 		})
 	}))
 	defer server.Close()
@@ -95,8 +100,44 @@ func TestClient_GetLoginRequestMapsAllOIDCContext(t *testing.T) {
 	}
 	if request.RequestedAAL != "urn:example:aal3" ||
 		!reflect.DeepEqual(request.RequestedACRValues, []string{"urn:example:aal3", "aal2"}) ||
-		request.Prompt != "login" || request.MaxAge == nil || *request.MaxAge != 60 {
+		request.Prompt != "login" || request.MaxAge == nil || *request.MaxAge != 60 ||
+		request.LoginHint != "user+tag@example.test" || request.UILocales != "fr-CA en-US" || request.Display != "popup" {
 		t.Fatalf("login request = %#v, want complete OIDC context", request)
+	}
+}
+
+func TestClient_GetLoginRequestOmitsUnsafeUIHints(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, map[string]any{
+			"challenge":   "login-challenge",
+			"client":      map[string]any{"client_id": "example-client"},
+			"request_url": "https://hydra.example/oauth2/auth",
+			"skip":        false,
+			"subject":     "",
+			"oidc_context": map[string]any{
+				"login_hint": "user\nother",
+				"ui_locales": []string{"en-US", "fr\nCA"},
+				"display":    "unknown",
+			},
+		})
+	}))
+	defer server.Close()
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := New(baseURL, server.Client(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := client.GetLoginRequest(context.Background(), "login-challenge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.LoginHint != "" || request.UILocales != "" || request.Display != "" {
+		t.Fatalf("unsafe UI hints escaped Hydra boundary: %#v", request)
 	}
 }
 

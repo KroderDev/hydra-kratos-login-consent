@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.9.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.8.0...v0.9.0) (2026-09-29)
+
+
+### Features
+
+* **http:** forward OIDC request context to external UI ([eefa45c](https://github.com/KroderDev/hydra-kratos-login-consent/commit/eefa45c1a22e52a9708ccb60d61aaf6fda2eac8c))
+* **http:** forward OIDC request context to external UI ([98eddb0](https://github.com/KroderDev/hydra-kratos-login-consent/commit/98eddb01bf09e046d5423ba67ee57a3ec1c5873e))
+
+
+### Dependencies
+
+* **deps:** bump alpine in the compose-non-major group ([9f96359](https://github.com/KroderDev/hydra-kratos-login-consent/commit/9f96359d09e4a894b3a8841325351818e4b28c99))
+* **deps:** bump alpine in the docker-non-major group across 1 directory ([5dc2f8c](https://github.com/KroderDev/hydra-kratos-login-consent/commit/5dc2f8c0079610bff5a9eb629ed3b9523d3b9465))
+* **deps:** bump golang from `648f440` to `69a7b97` ([4f0d0c4](https://github.com/KroderDev/hydra-kratos-login-consent/commit/4f0d0c491ddb65e0ea9e953000c96cb75e68bba2))
+* **deps:** bump redis from 8.10.1-alpine to 8.10.1-alpine ([9ab063f](https://github.com/KroderDev/hydra-kratos-login-consent/commit/9ab063f199ad1bde70f7a746854248fdc5949162))
+* **deps:** bump the actions-non-major group across 1 directory with 4 updates ([2419bdb](https://github.com/KroderDev/hydra-kratos-login-consent/commit/2419bdbb96730ec36f6394817b3d215105f8ca71))
+
+
+### Documentation
+
+* add self-service policy recipe ([5fdfac9](https://github.com/KroderDev/hydra-kratos-login-consent/commit/5fdfac91b75fba115b6a9df6c546ca63c4669ae0))
+* document self-service onboarding via HTTP policy ([f372190](https://github.com/KroderDev/hydra-kratos-login-consent/commit/f37219083c9bc4c7042a9fdeda07d7020eb337f9))
+
 ## [0.8.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.7.0...v0.8.0) (2026-09-20)
 
 

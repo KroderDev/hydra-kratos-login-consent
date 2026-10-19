@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.9.0...v0.10.0) (2026-10-19)
+
+
+### Features
+
+* **oidc:** derive email verification from Kratos evidence ([#88](https://github.com/KroderDev/hydra-kratos-login-consent/issues/88)) ([c77afee](https://github.com/KroderDev/hydra-kratos-login-consent/commit/c77afeeb15dcc3997cb00b3a67943b43d6035273))
+
 ## [0.9.0](https://github.com/KroderDev/hydra-kratos-login-consent/compare/v0.8.0...v0.9.0) (2026-09-29)
 
 

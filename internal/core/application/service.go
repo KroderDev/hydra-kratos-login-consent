@@ -610,7 +610,31 @@ func (s *Service) filterClaims(client config.Client, claims domain.Claims, sessi
 			))
 		}
 	}
+	// Verification evidence belongs to Kratos, never editable traits or policy claims.
+	setVerifiedEmailClaim(result.IDToken, client.AllowedIDTokenClaims, scopes, session.VerifiedEmails)
+	setVerifiedEmailClaim(result.AccessToken, client.AllowedAccessTokenClaims, scopes, session.VerifiedEmails)
+	setVerifiedEmailClaim(result.UserInfo, client.AllowedUserInfoClaims, scopes, session.VerifiedEmails)
 	return result
+}
+
+func setVerifiedEmailClaim(claims map[string]any, allowed map[string][]string, scopes, verifiedEmails []string) {
+	delete(claims, "email_verified")
+	filtered := filterIdentityClaimMap(map[string]any{"email_verified": true}, allowed, scopes)
+	if _, ok := filtered["email_verified"]; !ok {
+		return
+	}
+	email, ok := claims["email"].(string)
+	if !ok || email == "" {
+		return
+	}
+	verified := false
+	for _, address := range verifiedEmails {
+		if strings.EqualFold(strings.TrimSpace(email), address) {
+			verified = true
+			break
+		}
+	}
+	claims["email_verified"] = verified
 }
 
 func (s *Service) rejectLogin(ctx context.Context, challenge, code, description string) (RedirectResult, error) {

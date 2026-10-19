@@ -236,3 +236,42 @@ func TestFilterClaims_UserInfoDestinationIsolation(t *testing.T) {
 		t.Fatalf("userinfo claims = %#v, want none without a client allowlist", unallowlisted.UserInfo)
 	}
 }
+
+func TestFilterClaims_VerificationUsesKratosEvidenceForEmittedEmail(t *testing.T) {
+	t.Parallel()
+	service, _, _, _, _ := newTestService(t)
+	service.cfg.OIDCIdentityClaimMappings = identity.ClaimMappings{
+		"email":          {Source: "/traits/email", Type: "string", Format: "email"},
+		"email_verified": {Source: "/traits/email_verified", Type: "boolean"},
+	}
+	for _, test := range []struct {
+		name    string
+		emails  []string
+		scopes  []string
+		allowed bool
+		want    any
+	}{
+		{name: "matching completed address", emails: []string{"USER@example.com"}, scopes: []string{"openid", "email"}, allowed: true, want: true},
+		{name: "changed email", emails: []string{"previous@example.com"}, scopes: []string{"openid", "email"}, allowed: true, want: false},
+		{name: "forged trait and policy", scopes: []string{"openid", "email"}, allowed: true, want: false},
+		{name: "missing scope", emails: []string{"user@example.com"}, scopes: []string{"openid"}, allowed: true},
+		{name: "missing allowlist", emails: []string{"user@example.com"}, scopes: []string{"openid", "email"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			allowed := map[string][]string{"email": {"email"}}
+			if test.allowed {
+				allowed["email_verified"] = []string{"email"}
+			}
+			client := config.Client{ID: "test", AllowedUserInfoClaims: allowed, AllowedIDTokenClaims: allowed, AllowedAccessTokenClaims: allowed}
+			claims := map[string]any{"email": "user@example.com", "email_verified": true}
+			session := domain.Session{VerifiedEmails: test.emails, IdentityTraits: claims}
+			result := service.filterClaims(client, domain.Claims{IDToken: claims, AccessToken: claims, UserInfo: claims}, session, test.scopes)
+			for destination, actual := range map[string]map[string]any{"id_token": result.IDToken, "access_token": result.AccessToken, "userinfo": result.UserInfo} {
+				if actual["email_verified"] != test.want {
+					t.Errorf("%s verification = %v, want %v", destination, actual["email_verified"], test.want)
+				}
+			}
+		})
+	}
+}

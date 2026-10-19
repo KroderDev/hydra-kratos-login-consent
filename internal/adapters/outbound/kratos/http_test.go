@@ -93,6 +93,27 @@ func TestClient_ValidateSessionMapsUnauthorized(t *testing.T) {
 	}
 }
 
+func TestClient_ValidateSessionRetainsOnlyCompletedEmailEvidence(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"active":true,"identity":{"id":"user-1","traits":{"email_verified":true},"verifiable_addresses":[{"value":"verified@example.com","via":"email","verified":true,"status":"completed"},{"value":"pending@example.com","via":"email","verified":false,"status":"pending"},{"value":"inconsistent@example.com","via":"email","verified":true,"status":"pending"},{"value":"+1555000","via":"sms","verified":true,"status":"completed"}]}}`))
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	client, err := New(baseURL, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := client.ValidateSession(context.Background(), ports.SessionCredentials{Token: "synthetic-session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(session.VerifiedEmails) != 1 || session.VerifiedEmails[0] != "verified@example.com" {
+		t.Fatalf("verification evidence = %#v", session.VerifiedEmails)
+	}
+}
+
 func TestClient_ValidateSessionRejectsMissingCredentialsWithoutRequest(t *testing.T) {
 	t.Parallel()
 

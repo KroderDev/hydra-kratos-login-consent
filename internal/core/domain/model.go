@@ -69,6 +69,8 @@ type Session struct {
 	AuthenticatedAt        time.Time
 	IdentityTraits         map[string]any
 	IdentityMetadataPublic map[string]any
+	// VerifiedEmails comes exclusively from Kratos verifiable_addresses, never traits.
+	VerifiedEmails []string
 }
 
 // Claims contains destination-specific claims for Hydra consent processing.

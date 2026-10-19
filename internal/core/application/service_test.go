@@ -490,8 +490,8 @@ func TestService_DerivesIdentityClaimsAfterPolicyApproval(t *testing.T) {
 	if idToken["picture"] != "https://images.example/avatar.png" {
 		t.Fatalf("picture claim = %#v, want mapped HTTPS URL", idToken["picture"])
 	}
-	if _, ok := idToken["email_verified"]; ok {
-		t.Fatal("email_verified was inferred without a mapped source")
+	if idToken["email_verified"] != false {
+		t.Fatal("email_verified must be false without Kratos verification evidence")
 	}
 	if got := hydra.consentAcceptance.Session.AccessToken["api_role"]; got != "reader" {
 		t.Fatalf("policy access claim = %#v, want reader", got)

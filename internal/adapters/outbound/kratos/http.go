@@ -97,6 +97,7 @@ func (c *Client) ValidateSession(ctx context.Context, credentials ports.SessionC
 		AuthenticatedAt:        payload.AuthenticatedAt,
 		IdentityTraits:         payload.Identity.Traits,
 		IdentityMetadataPublic: payload.Identity.MetadataPublic,
+		VerifiedEmails:         payload.verifiedEmails(),
 	}, nil
 }
 
@@ -126,10 +127,26 @@ type sessionResponse struct {
 	AuthenticatedAt       time.Time              `json:"authenticated_at"`
 	AuthenticationMethods []authenticationMethod `json:"authentication_methods"`
 	Identity              struct {
-		ID             string         `json:"id"`
-		Traits         map[string]any `json:"traits"`
-		MetadataPublic map[string]any `json:"metadata_public"`
+		ID                  string         `json:"id"`
+		Traits              map[string]any `json:"traits"`
+		MetadataPublic      map[string]any `json:"metadata_public"`
+		VerifiableAddresses []struct {
+			Value    string `json:"value"`
+			Via      string `json:"via"`
+			Verified bool   `json:"verified"`
+			Status   string `json:"status"`
+		} `json:"verifiable_addresses"`
 	} `json:"identity"`
+}
+
+func (s sessionResponse) verifiedEmails() []string {
+	var emails []string
+	for _, address := range s.Identity.VerifiableAddresses {
+		if address.Via == "email" && address.Verified && address.Status == "completed" && strings.TrimSpace(address.Value) != "" {
+			emails = append(emails, strings.TrimSpace(address.Value))
+		}
+	}
+	return emails
 }
 
 func (s sessionResponse) AMR() []string {

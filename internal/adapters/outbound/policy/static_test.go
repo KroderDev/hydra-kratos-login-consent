@@ -50,6 +50,40 @@ func TestStaticEmptyClientAllowlistAllowsAnyClient(t *testing.T) {
 	}
 }
 
+func TestStaticWildcardSubjectAllowsAnySubject(t *testing.T) {
+	t.Parallel()
+
+	policy := NewStatic([]string{"*"}, []string{"client-1"})
+	allowed, err := policy.AuthorizeLogin(context.Background(), ports.PolicyInput{Subject: "random-user-id", ClientID: "client-1"})
+	if err != nil {
+		t.Fatalf("AuthorizeLogin: %v", err)
+	}
+	if !allowed {
+		t.Fatal("wildcard subject denied an allowed client")
+	}
+
+	allowedWrongClient, err := policy.AuthorizeLogin(context.Background(), ports.PolicyInput{Subject: "random-user-id", ClientID: "wrong-client"})
+	if err != nil {
+		t.Fatalf("AuthorizeLogin: %v", err)
+	}
+	if allowedWrongClient {
+		t.Fatal("wildcard subject allowed an unlisted client")
+	}
+}
+
+func TestStaticWildcardClientAllowsAnyClient(t *testing.T) {
+	t.Parallel()
+
+	policy := NewStatic([]string{"operator-1"}, []string{"*"})
+	allowed, err := policy.AuthorizeLogin(context.Background(), ports.PolicyInput{Subject: "operator-1", ClientID: "any-client-id"})
+	if err != nil {
+		t.Fatalf("AuthorizeLogin: %v", err)
+	}
+	if !allowed {
+		t.Fatal("wildcard client denied an allowed subject")
+	}
+}
+
 func TestStaticConsentClonesClaims(t *testing.T) {
 	t.Parallel()
 

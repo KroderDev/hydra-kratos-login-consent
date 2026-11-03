@@ -57,6 +57,12 @@ func (p *Static) AuthorizeConsent(_ context.Context, input ports.PolicyInput) (p
 	if allowed && p.RequireScopes {
 		clientScopes, ok := p.SubjectScopes[input.Subject][input.ClientID]
 		if !ok {
+			if wildcardScopes, hasWildcard := p.SubjectScopes["*"][input.ClientID]; hasWildcard {
+				clientScopes = wildcardScopes
+				ok = true
+			}
+		}
+		if !ok {
 			allowed = false
 		}
 		for _, scope := range input.GrantedScopes {
@@ -80,10 +86,15 @@ func (p *Static) AuthorizeConsent(_ context.Context, input ports.PolicyInput) (p
 }
 
 func (p *Static) allowed(subject, clientID string) bool {
-	if _, ok := p.Subjects[subject]; !ok {
-		return false
+	if _, wildcard := p.Subjects["*"]; !wildcard {
+		if _, ok := p.Subjects[subject]; !ok {
+			return false
+		}
 	}
 	if len(p.Clients) == 0 {
+		return true
+	}
+	if _, wildcard := p.Clients["*"]; wildcard {
 		return true
 	}
 	_, ok := p.Clients[clientID]
